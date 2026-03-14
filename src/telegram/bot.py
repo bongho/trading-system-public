@@ -38,6 +38,7 @@ class TradingBot:
         )
 
     def setup_handlers(self) -> None:
+        from src.telegram.handlers.monitor import register_monitor_handlers
         from src.telegram.handlers.strategy import register_strategy_handlers
         from src.telegram.handlers.system import register_system_handlers
         from src.telegram.handlers.trade import register_trade_handlers
@@ -45,6 +46,7 @@ class TradingBot:
         register_system_handlers(self)
         register_trade_handlers(self)
         register_strategy_handlers(self)
+        register_monitor_handlers(self)
         logger.info("Telegram handlers registered")
 
     async def start(self) -> None:

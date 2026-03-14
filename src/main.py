@@ -22,6 +22,8 @@ from src.strategies.registry import StrategyRegistry
 from src.strategies.simple_rsi import create_strategy as create_simple_rsi
 from src.telegram.bot import TradingBot
 
+os.makedirs("data/logs", exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

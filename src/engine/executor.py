@@ -23,6 +23,9 @@ class Executor:
         self._risk = risk_manager
         self._trade_repo = trade_repo
         self._notify = notify_callback
+        self.last_signals: dict[
+            str, list[dict[str, Any]]
+        ] = {}  # strategy_id -> signals
 
     async def run_strategy(self, strategy: Strategy) -> list[dict[str, Any]]:
         """단일 전략 실행: 시장 데이터 수집 → 시그널 → 리스크 체크 → 주문"""
@@ -54,6 +57,18 @@ class Executor:
                 params=strategy.params,
             )
             signals = await strategy.execute(ctx)
+
+            # 시그널 기록 (디버깅용)
+            self.last_signals[strategy.id] = [
+                {
+                    "symbol": s.symbol,
+                    "side": s.side,
+                    "amount": s.amount,
+                    "confidence": s.confidence,
+                    "reason": s.reason,
+                }
+                for s in signals
+            ]
 
             # 4. 각 시그널 처리
             for signal in signals:

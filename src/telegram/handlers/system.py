@@ -50,6 +50,13 @@ async def _help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /status - 전체 상태
 /portfolio [broker] - 포트폴리오
 /history [N] - 최근 N건 매매 이력
+/price <symbol> - 현재가 조회
+
+📈 분석
+/report - 즉시 일간 리포트
+/pnl [today|week|month] - 기간별 손익
+/signals - 마지막 전략 시그널
+/risk - 리스크 현황
 
 💰 매매
 /trade buy upbit KRW-BTC 10000 - 수동 매수
@@ -61,10 +68,11 @@ async def _help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /strategy pause <id> - 일시 정지
 /strategy resume <id> - 재개
 /param <strategy> <key> <value> - 파라미터 변경
+/stop - 전체 전략 긴급 정지
 
 🔧 시스템
-/logs [N] - 최근 로그
-/restart - 시스템 재시작"""
+/health - 시스템 상태 (uptime, DB, 연결)
+/logs [N] - 최근 로그"""
     await update.message.reply_text(text)
 
 

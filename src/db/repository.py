@@ -96,6 +96,40 @@ class TradeRepository:
         columns = [desc[0] for desc in cursor.description]
         return dict(zip(columns, row)) if row else {}
 
+    async def get_pnl_by_period(self, period: str = "today") -> dict[str, Any]:
+        """기간별 손익 조회. period: today, week, month, all"""
+        now = datetime.now(KST)
+        if period == "today":
+            since = now.replace(hour=0, minute=0, second=0).isoformat()
+        elif period == "week":
+            since = (now - timedelta(days=7)).isoformat()
+        elif period == "month":
+            since = (now - timedelta(days=30)).isoformat()
+        else:
+            since = "2000-01-01"
+
+        cursor = await self._db.execute(
+            """SELECT
+                strategy_id,
+                COUNT(*) as trades,
+                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END) as losses,
+                COALESCE(SUM(pnl), 0) as total_pnl,
+                COALESCE(SUM(fee), 0) as total_fee
+            FROM trades
+            WHERE side = 'sell' AND pnl IS NOT NULL
+                AND executed_at >= ?
+            GROUP BY strategy_id""",
+            (since,),
+        )
+        columns = [desc[0] for desc in cursor.description]
+        rows = await cursor.fetchall()
+        return {
+            "period": period,
+            "since": since[:10],
+            "strategies": [dict(zip(columns, row)) for row in rows],
+        }
+
 
 class StrategyRepository:
     def __init__(self, db: aiosqlite.Connection) -> None:
