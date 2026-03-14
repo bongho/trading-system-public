@@ -1,0 +1,18 @@
+services:
+  trading-engine:
+    build: .
+    container_name: trading-engine
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./sandbox:/app/sandbox
+      - ./src/strategies:/app/src/strategies  # hot-reload
+    environment:
+      - TZ=Asia/Seoul
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
