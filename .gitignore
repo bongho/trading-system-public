@@ -10,3 +10,4 @@ dist/
 .venv/
 sandbox/strategies/
 sandbox/results/
+data/logs/

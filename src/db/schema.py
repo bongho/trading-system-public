@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS market_data (
     PRIMARY KEY (symbol, timeframe, timestamp)
 );
 
+CREATE INDEX IF NOT EXISTS idx_market_data_lookup
+    ON market_data(symbol, timeframe, timestamp DESC);
+
 CREATE TABLE IF NOT EXISTS agent_sessions (
     session_id TEXT NOT NULL,
     turn INTEGER NOT NULL,

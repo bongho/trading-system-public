@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import uuid
@@ -208,6 +209,84 @@ class UpbitAdapter(BrokerAdapter):
             ],
             timestamp=str(book.get("timestamp", "")),
         )
+
+    async def get_historical_data(
+        self,
+        symbol: str,
+        interval: str = "5m",
+        days: int = 30,
+    ) -> list[MarketData]:
+        """히스토리컬 데이터 pagination (200캔들 제한 우회).
+
+        Upbit API는 최대 200캔들/요청. 30일 5분봉 = 8640캔들 → 44회 요청.
+        to 파라미터로 과거 방향 pagination.
+        """
+        interval_map = {
+            "1m": "minutes/1",
+            "3m": "minutes/3",
+            "5m": "minutes/5",
+            "15m": "minutes/15",
+            "1h": "minutes/60",
+            "4h": "minutes/240",
+            "1d": "days",
+        }
+        path_suffix = interval_map.get(interval, "minutes/5")
+
+        # 간격별 분 수
+        interval_minutes = {
+            "1m": 1, "3m": 3, "5m": 5, "15m": 15,
+            "1h": 60, "4h": 240, "1d": 1440,
+        }
+        mins = interval_minutes.get(interval, 5)
+        total_candles = (days * 24 * 60) // mins
+
+        all_data: list[MarketData] = []
+        to_param: str | None = None
+        remaining = total_candles
+
+        while remaining > 0:
+            batch_size = min(remaining, 200)
+            params: dict[str, Any] = {
+                "market": symbol,
+                "count": batch_size,
+            }
+            if to_param:
+                params["to"] = to_param
+
+            data = await self._request(
+                "GET", f"/candles/{path_suffix}", params=params
+            )
+            if not data:
+                break
+
+            batch = [
+                MarketData(
+                    symbol=symbol,
+                    timestamp=c["candle_date_time_kst"],
+                    open=float(c["opening_price"]),
+                    high=float(c["high_price"]),
+                    low=float(c["low_price"]),
+                    close=float(c["trade_price"]),
+                    volume=float(c["candle_acc_trade_volume"]),
+                )
+                for c in data
+            ]
+            all_data.extend(batch)
+
+            # 다음 페이지: 마지막 캔들의 시간을 to로
+            to_param = data[-1]["candle_date_time_utc"]
+            remaining -= len(batch)
+
+            # Rate limit: 초당 10회 제한
+            await asyncio.sleep(0.11)
+
+        # 시간순 정렬 (오래된 → 최신)
+        all_data.reverse()
+        logger.info(
+            "Fetched %d candles for %s (%s, %d days)",
+            len(all_data), symbol, interval, days,
+        )
+        return all_data
 
     async def get_current_price(self, symbol: str) -> float:
         data = await self._request("GET", "/ticker", params={"markets": symbol})

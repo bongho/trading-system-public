@@ -11,8 +11,13 @@ services:
       - ./src/strategies:/app/src/strategies  # hot-reload
     environment:
       - TZ=Asia/Seoul
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "python", "-c", "import src.config; print('ok')"]
       interval: 60s
       timeout: 10s
       retries: 3

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiosqlite
+
+from src.brokers.base import MarketData
+
+logger = logging.getLogger(__name__)
 
 KST = timezone(timedelta(hours=9))
 
@@ -267,6 +272,127 @@ class PendingTradeRepository:
         cursor = await self._db.execute(
             "DELETE FROM pending_trades WHERE expires_at <= ?",
             (_now_kst(),),
+        )
+        await self._db.commit()
+        return cursor.rowcount
+
+
+class MarketDataRepository:
+    """OHLCV 캔들 데이터 저장/조회 — Read-through 캐시 패턴."""
+
+    def __init__(self, db: aiosqlite.Connection) -> None:
+        self._db = db
+
+    async def upsert_candles(
+        self, candles: list[MarketData], timeframe: str = "5m"
+    ) -> int:
+        """캔들 데이터 일괄 저장 (중복 시 업데이트)."""
+        if not candles:
+            return 0
+        await self._db.executemany(
+            """INSERT INTO market_data
+            (symbol, timeframe, timestamp, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(symbol, timeframe, timestamp) DO UPDATE SET
+                open=excluded.open, high=excluded.high,
+                low=excluded.low, close=excluded.close,
+                volume=excluded.volume""",
+            [
+                (
+                    c.symbol, timeframe, c.timestamp,
+                    c.open, c.high, c.low, c.close, c.volume,
+                )
+                for c in candles
+            ],
+        )
+        await self._db.commit()
+        return len(candles)
+
+    async def get_candles(
+        self,
+        symbol: str,
+        timeframe: str = "5m",
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int | None = None,
+    ) -> list[MarketData]:
+        """저장된 캔들 조회 (시간순 정렬)."""
+        query = (
+            "SELECT symbol, timestamp, open, high, low, close, volume "
+            "FROM market_data WHERE symbol = ? AND timeframe = ?"
+        )
+        params: list[Any] = [symbol, timeframe]
+
+        if since:
+            query += " AND timestamp >= ?"
+            params.append(since)
+        if until:
+            query += " AND timestamp <= ?"
+            params.append(until)
+
+        query += " ORDER BY timestamp ASC"
+
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        cursor = await self._db.execute(query, params)
+        rows = await cursor.fetchall()
+        return [
+            MarketData(
+                symbol=row[0],
+                timestamp=row[1],
+                open=row[2],
+                high=row[3],
+                low=row[4],
+                close=row[5],
+                volume=row[6],
+            )
+            for row in rows
+        ]
+
+    async def get_candle_count(
+        self, symbol: str, timeframe: str = "5m"
+    ) -> int:
+        """저장된 캔들 수 조회."""
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM market_data WHERE symbol = ? AND timeframe = ?",
+            (symbol, timeframe),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def get_latest_timestamp(
+        self, symbol: str, timeframe: str = "5m"
+    ) -> str | None:
+        """가장 최근 캔들 타임스탬프 조회."""
+        cursor = await self._db.execute(
+            "SELECT MAX(timestamp) FROM market_data "
+            "WHERE symbol = ? AND timeframe = ?",
+            (symbol, timeframe),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row and row[0] else None
+
+    async def get_oldest_timestamp(
+        self, symbol: str, timeframe: str = "5m"
+    ) -> str | None:
+        """가장 오래된 캔들 타임스탬프 조회."""
+        cursor = await self._db.execute(
+            "SELECT MIN(timestamp) FROM market_data "
+            "WHERE symbol = ? AND timeframe = ?",
+            (symbol, timeframe),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row and row[0] else None
+
+    async def cleanup_old(self, days: int = 365) -> int:
+        """오래된 데이터 정리."""
+        cutoff = (datetime.now(KST) - timedelta(days=days)).isoformat()
+        cursor = await self._db.execute(
+            "DELETE FROM market_data WHERE timestamp < ?",
+            (cutoff,),
         )
         await self._db.commit()
         return cursor.rowcount

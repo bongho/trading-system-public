@@ -4,6 +4,7 @@ import logging
 
 from telegram.ext import Application
 
+from src.agents.orchestrator import AgentOrchestrator
 from src.brokers.base import BrokerAdapter
 from src.config import settings
 from src.db.repository import (
@@ -26,6 +27,7 @@ class TradingBot:
         trade_repo: TradeRepository,
         strategy_repo: StrategyRepository,
         pending_repo: PendingTradeRepository,
+        orchestrator: AgentOrchestrator | None = None,
     ) -> None:
         self.brokers = brokers
         self.registry = registry
@@ -33,11 +35,13 @@ class TradingBot:
         self.trade_repo = trade_repo
         self.strategy_repo = strategy_repo
         self.pending_repo = pending_repo
+        self.orchestrator = orchestrator
         self.app: Application = (
             Application.builder().token(settings.telegram_bot_token).build()
         )
 
     def setup_handlers(self) -> None:
+        from src.telegram.handlers.ai import register_ai_handlers
         from src.telegram.handlers.monitor import register_monitor_handlers
         from src.telegram.handlers.strategy import register_strategy_handlers
         from src.telegram.handlers.system import register_system_handlers
@@ -47,6 +51,7 @@ class TradingBot:
         register_trade_handlers(self)
         register_strategy_handlers(self)
         register_monitor_handlers(self)
+        register_ai_handlers(self)
         logger.info("Telegram handlers registered")
 
     async def start(self) -> None:

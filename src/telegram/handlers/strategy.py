@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 from telegram.ext import ContextTypes
 
 from src.telegram.middleware import authorized_only
-from src.utils.formatters import format_strategy_status
+from src.utils.formatters import (
+    format_krw,
+    format_pct,
+    format_pnl,
+    format_strategy_status,
+)
 from telegram import Update
 
 if TYPE_CHECKING:
@@ -132,10 +137,100 @@ async def _param(
 async def _backtest(
     update: Update, context: ContextTypes.DEFAULT_TYPE, bot: TradingBot
 ) -> None:
-    """/backtest <strategy_id> [days]"""
+    """/backtest <strategy_id> [days] - 히스토리컬 데이터 백테스트"""
     args = context.args or []
     if not args:
-        await update.message.reply_text("사용법: /backtest <strategy_id> [days]")
+        ids = [s.id for s in bot.registry.get_all()]
+        await update.message.reply_text(
+            "사용법: /backtest <strategy_id> [days]\n"
+            f"예시: /backtest simple_rsi 30\n\n"
+            f"등록된 전략: {', '.join(ids) or '없음'}"
+        )
         return
 
-    await update.message.reply_text("🔄 백테스트는 Phase 2에서 구현 예정입니다.")
+    strategy_id = args[0]
+    days = 30
+    if len(args) > 1:
+        try:
+            days = int(args[1])
+            if days < 1 or days > 365:
+                await update.message.reply_text("❌ days는 1~365 범위로 입력하세요.")
+                return
+        except ValueError:
+            await update.message.reply_text("❌ days는 숫자로 입력하세요.")
+            return
+
+    strategy = bot.registry.get(strategy_id)
+    if not strategy:
+        await update.message.reply_text(f"❌ 전략을 찾을 수 없음: {strategy_id}")
+        return
+
+    broker = bot.brokers.get(strategy.broker)
+    if not broker:
+        await update.message.reply_text(f"❌ 브로커 미연결: {strategy.broker}")
+        return
+
+    await update.message.reply_text(
+        f"⏳ 백테스트 실행 중...\n"
+        f"  전략: {strategy.name}\n"
+        f"  기간: {days}일\n"
+        f"  심볼: {', '.join(strategy.symbols)}\n"
+        f"  (데이터 수집에 시간이 걸릴 수 있습니다)"
+    )
+
+    try:
+        # 히스토리컬 데이터 수집
+        historical: dict = {}
+        for symbol in strategy.symbols:
+            data = await broker.get_historical_data(symbol, "5m", days)
+            if data:
+                historical[symbol] = data
+
+        if not historical:
+            await update.message.reply_text(
+                "❌ 히스토리컬 데이터를 가져올 수 없습니다."
+            )
+            return
+
+        # 백테스트 실행
+        result = await strategy.backtest(historical)
+
+        # 결과 포맷
+        total_candles = sum(len(v) for v in historical.values())
+        pnl_emoji = "📈" if result.total_pnl >= 0 else "📉"
+
+        lines = [
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"📊 백테스트 결과: {strategy.name}",
+            f"  기간: {days}일 | 캔들: {total_candles:,}개",
+            f"  초기 자본: {format_krw(strategy.capital_allocation)}",
+            "",
+            f"{pnl_emoji} 성과",
+            f"  총 손익: {format_pnl(result.total_pnl)} ({format_pct(result.total_pnl_pct)})",
+            f"  총 매매: {result.total_trades}건",
+            f"  승률: {result.win_rate:.1f}% ({result.win_count}승 {result.loss_count}패)",
+            "",
+            "📐 리스크 지표",
+            f"  최대 낙폭 (MDD): {format_pct(result.max_drawdown)}",
+            f"  샤프 비율: {result.sharpe_ratio:.2f}",
+            f"  평균 이익: {format_pnl(result.avg_profit)}",
+            f"  평균 손실: {format_krw(result.avg_loss)}",
+        ]
+
+        # 최근 거래 내역
+        if result.trades:
+            lines.append("")
+            lines.append("🔄 최근 거래 (최대 10건)")
+            for t in result.trades:
+                emoji = "✅" if t["pnl"] > 0 else "❌"
+                lines.append(
+                    f"  {emoji} {t['symbol']} {format_pnl(t['pnl'])} "
+                    f"({format_pct(t['pnl_pct'] * 100)})"
+                )
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        await update.message.reply_text("\n".join(lines))
+
+    except Exception as e:
+        logger.error("Backtest failed: %s", e, exc_info=True)
+        await update.message.reply_text(f"❌ 백테스트 실패: {e}")

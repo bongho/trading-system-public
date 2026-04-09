@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -15,9 +16,11 @@ class TradingScheduler:
         self,
         registry: StrategyRegistry,
         executor: Executor,
+        daily_report_callback: Any | None = None,
     ) -> None:
         self._registry = registry
         self._executor = executor
+        self._daily_report_callback = daily_report_callback
         self._scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
         self._jobs: dict[str, str] = {}  # strategy_id -> job_id
 
@@ -34,6 +37,17 @@ class TradingScheduler:
             minute=0,
             id="daily_reset",
         )
+
+        # 일간 리포트 (21:00 KST)
+        if self._daily_report_callback:
+            self._scheduler.add_job(
+                self._send_daily_report,
+                "cron",
+                hour=21,
+                minute=0,
+                id="daily_report",
+            )
+            logger.info("Daily report scheduled at 21:00 KST")
 
         self._scheduler.start()
         logger.info("Trading scheduler started with %d strategies", len(self._jobs))
@@ -80,6 +94,23 @@ class TradingScheduler:
     async def _daily_reset(self) -> None:
         logger.info("Daily reset triggered")
         self._executor._risk.reset_daily()
+
+    async def _send_daily_report(self) -> None:
+        """21:00 KST 일간 리포트 전송"""
+        if not self._daily_report_callback:
+            return
+        try:
+            strategies = [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "capital_allocation": s.capital_allocation,
+                }
+                for s in self._registry.get_all()
+            ]
+            await self._daily_report_callback(strategies)
+        except Exception as e:
+            logger.error("Daily report failed: %s", e, exc_info=True)
 
     async def run_once(self, strategy_id: str) -> list:
         """수동으로 전략 1회 실행"""

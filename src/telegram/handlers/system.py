@@ -70,6 +70,14 @@ async def _help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /param <strategy> <key> <value> - 파라미터 변경
 /stop - 전체 전략 긴급 정지
 
+🤖 AI 에이전트
+/ai analyze <symbol> - 시장 분석
+/ai optimize [strategy] - 전략 최적화
+/ai review [strategy] - 전략 검토
+/ai status - 대기 중인 제안
+/ai confirm <id> - 제안 적용
+/ai cancel <id> - 제안 취소
+
 🔧 시스템
 /health - 시스템 상태 (uptime, DB, 연결)
 /logs [N] - 최근 로그"""

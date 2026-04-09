@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Kiwoom (Phase 4)
     kiwoom_app_key: str = ""
     kiwoom_app_secret: str = ""
+    kiwoom_access_token: str = ""
+    kiwoom_account_no: str = ""
+    kiwoom_is_paper: bool = True
 
     # Telegram
     telegram_bot_token: str = ""
@@ -24,6 +27,10 @@ class Settings(BaseSettings):
 
     # Anthropic (Phase 5)
     anthropic_api_key: str = ""
+
+    # OpenAI (Phase 5 대안)
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o"
 
     # Database
     db_path: str = "data/trading.db"

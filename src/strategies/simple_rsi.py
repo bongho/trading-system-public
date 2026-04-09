@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.brokers.base import MarketData
+from src.engine.backtest import BacktestEngine
 from src.strategies.base import BacktestResult, Strategy, StrategyContext, TradeSignal
 from src.utils.indicators import rsi, to_dataframe
 
@@ -88,8 +89,68 @@ class SimpleRSIStrategy(Strategy):
         return signals
 
     async def backtest(self, historical: dict[str, list[MarketData]]) -> BacktestResult:
-        # Phase 2에서 상세 구현
-        return BacktestResult()
+        """RSI 기반 백테스트: 캔들 순회하며 시그널 생성 → BacktestEngine 실행."""
+        # 첫 번째 심볼로 백테스트
+        symbol = next(iter(historical), None)
+        if not symbol:
+            return BacktestResult()
+
+        candles = historical[symbol]
+        if len(candles) < self.params["rsi_period"] + 2:
+            return BacktestResult()
+
+        df = to_dataframe(candles)
+        rsi_series = rsi(df["close"], self.params["rsi_period"])
+
+        # 시그널 생성
+        signals: list[dict[str, Any]] = []
+        in_position = False
+
+        for i in range(1, len(rsi_series)):
+            if rsi_series.isna().iloc[i] or rsi_series.isna().iloc[i - 1]:
+                continue
+
+            current = rsi_series.iloc[i]
+            prev = rsi_series.iloc[i - 1]
+
+            if (
+                not in_position
+                and current < self.params["buy_threshold"]
+                and current > prev
+            ):
+                signals.append({"idx": i, "side": "buy", "symbol": symbol})
+                in_position = True
+            elif (
+                in_position
+                and current > self.params["sell_threshold"]
+                and current < prev
+            ):
+                signals.append({"idx": i, "side": "sell", "symbol": symbol})
+                in_position = False
+
+            # 손절/익절 체크 (포지션 보유 시)
+            if in_position and signals:
+                last_buy = next(
+                    (s for s in reversed(signals) if s["side"] == "buy"), None
+                )
+                if last_buy and last_buy["idx"] + 1 < len(candles):
+                    entry_price = candles[last_buy["idx"] + 1].open
+                    current_price = candles[i].close
+                    pnl_pct = (current_price - entry_price) / entry_price
+
+                    if pnl_pct <= -self.params["stop_loss_pct"]:
+                        signals.append(
+                            {"idx": i, "side": "sell", "symbol": symbol}
+                        )
+                        in_position = False
+                    elif pnl_pct >= self.params["take_profit_pct"]:
+                        signals.append(
+                            {"idx": i, "side": "sell", "symbol": symbol}
+                        )
+                        in_position = False
+
+        engine = BacktestEngine(initial_capital=self.capital_allocation)
+        return engine.run_simple(candles, signals)
 
 
 def create_strategy(

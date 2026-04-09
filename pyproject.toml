@@ -12,6 +12,7 @@ dependencies = [
     "pandas-ta>=0.3.14b",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
+    "PyJWT>=2.8.0",
     "python-telegram-bot>=21.0",
     "pyupbit>=0.2.33",
 ]

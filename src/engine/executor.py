@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from src.brokers.base import BrokerAdapter, MarketData
-from src.db.repository import TradeRepository
+from src.db.repository import MarketDataRepository, TradeRepository
 from src.engine.risk_manager import RiskManager
 from src.strategies.base import Strategy, StrategyContext, TradeSignal
 
@@ -18,11 +18,13 @@ class Executor:
         risk_manager: RiskManager,
         trade_repo: TradeRepository,
         notify_callback: Any | None = None,
+        market_data_repo: MarketDataRepository | None = None,
     ) -> None:
         self._brokers = brokers
         self._risk = risk_manager
         self._trade_repo = trade_repo
         self._notify = notify_callback
+        self._market_repo = market_data_repo
         self.last_signals: dict[
             str, list[dict[str, Any]]
         ] = {}  # strategy_id -> signals
@@ -39,11 +41,17 @@ class Executor:
 
         results = []
         try:
-            # 1. 시장 데이터 수집
+            # 1. 시장 데이터 수집 + write-through 캐시
             market_data: dict[str, list[MarketData]] = {}
             for symbol in strategy.symbols:
                 data = await broker.get_market_data(symbol, "5m", 200)
                 market_data[symbol] = data
+                # DB에 자동 저장 (비동기, 실패해도 전략 실행에 영향 없음)
+                if self._market_repo and data:
+                    try:
+                        await self._market_repo.upsert_candles(data, "5m")
+                    except Exception as e:
+                        logger.warning("Failed to cache market data: %s", e)
 
             # 2. 포트폴리오 조회
             portfolio = await broker.get_portfolio()

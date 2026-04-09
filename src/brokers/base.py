@@ -105,4 +105,8 @@ def get_broker(broker_name: str, **kwargs: Any) -> BrokerAdapter:
         from src.brokers.upbit import UpbitAdapter
 
         return UpbitAdapter(**kwargs)
+    if broker_name == "kiwoom":
+        from src.brokers.kiwoom import KiwoomAdapter
+
+        return KiwoomAdapter(**kwargs)
     raise ValueError(f"Unknown broker: {broker_name}")
