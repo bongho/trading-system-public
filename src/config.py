@@ -40,5 +40,10 @@ class Settings(BaseSettings):
     max_position_pct: float = Field(default=0.30, description="전략당 최대 포지션 비율")
     default_interval_minutes: int = 5
 
+    # Swarm Consensus (Phase 6)
+    swarm_enabled: bool = Field(default=False, description="멀티에이전트 신호 합의 활성화")
+    swarm_quorum: int = Field(default=2, description="합의에 필요한 최소 approve 수 (최대 3)")
+    swarm_min_confidence: float = Field(default=0.4, description="합의를 실행할 최소 신호 confidence")
+
 
 settings = Settings()

@@ -61,26 +61,39 @@ graph TB
     SCH -->|일일 리포트| DC
 ```
 
-### 매매 실행 흐름
+### 매매 실행 흐름 (Swarm Consensus 포함)
 
 ```mermaid
 sequenceDiagram
     participant S as 전략 (Strategy)
-    participant A as AI 에이전트 (선택)
     participant E as Executor
     participant R as RiskManager
+    participant SW as Swarm Consensus
+    participant T as 기술적 분석 에이전트
+    participant RG as 리스크 가드 에이전트
+    participant C as 컨트라리언 에이전트
     participant B as 브로커 (키움/업비트)
     participant D as DB
 
-    S->>E: TradeSignal(symbol, side, amount)
-    opt AI 검토 활성화 시
-        E->>A: review_signal(신호, 시장 컨텍스트)
-        A-->>E: 승인 / 거부 / 수정
-    end
+    S->>E: TradeSignal(symbol, side, confidence)
     E->>R: check_risk(신호, 포트폴리오)
-    R-->>E: 승인 (일일 손실 & 포지션 한도 이내)
-    E->>B: buy(symbol, amount) / sell(symbol, volume)
-    B-->>E: TradeResult(order_id, price, volume)
+    R-->>E: 승인
+
+    opt SWARM_ENABLED=true
+        E->>SW: evaluate(신호, 시장 컨텍스트)
+        par 병렬 투표
+            SW->>T: vote(신호)
+            SW->>RG: vote(신호)
+            SW->>C: vote(신호)
+        end
+        T-->>SW: approve/reject/abstain
+        RG-->>SW: approve/reject/abstain
+        C-->>SW: approve/reject/abstain
+        SW-->>E: ConsensusResult (2/3 쿼럼)
+    end
+
+    E->>B: buy / sell
+    B-->>E: TradeResult
     E->>D: 거래 내역 저장
     E-->>Telegram: 거래 알림 발송
 ```
@@ -324,6 +337,40 @@ services:
 pytest -v
 pytest --cov=src --cov-report=term-missing
 ```
+
+---
+
+## 로드맵
+
+```mermaid
+gantt
+    title Trading System 로드맵
+    dateFormat YYYY-MM
+    axisFormat %Y-%m
+
+    section 핵심 엔진
+    브로커 추상화 (업비트 + 키움)     :done, 2025-03, 1M
+    전략 엔진 + 3개 전략             :done, 2025-03, 1M
+    리스크 매니저 + Executor         :done, 2025-03, 1M
+    텔레그램 봇 + 디스코드 리포터    :done, 2025-03, 1M
+
+    section AI 레이어
+    Evaluator-Optimizer 오케스트레이터 :done, 2025-03, 1M
+    Swarm Consensus (3-에이전트 투표)  :done, 2025-04, 1M
+    PSO 파라미터 자동 최적화           :active, pso, 2025-05, 2M
+    전략 자본 배분 자동 조정           :alloc, after pso, 2M
+```
+
+| 단계 | 기능 | 상태 |
+|------|------|------|
+| 1 | 업비트 브로커 + 기본 전략 엔진 | ✅ 완료 |
+| 2 | SimpleRSI 전략 + 백테스트 | ✅ 완료 |
+| 3 | 디스코드 일일 리포트 + 텔레그램 봇 | ✅ 완료 |
+| 4 | DoubleBB & SqueezeMTF 전략 + 키움 REST API | ✅ 완료 |
+| 5 | AI 에이전트 (Evaluator-Optimizer 루프) | ✅ 완료 |
+| **6** | **Swarm Consensus — 3-에이전트 신호 합의** | ✅ **완료** |
+| 7 | PSO 파라미터 자동 최적화 (주 1회) | 🔜 예정 |
+| 8 | 전략별 자본 배분 자동 조정 | 🔜 예정 |
 
 ---
 

@@ -8,6 +8,12 @@ from src.db.repository import MarketDataRepository, TradeRepository
 from src.engine.risk_manager import RiskManager
 from src.strategies.base import Strategy, StrategyContext, TradeSignal
 
+# SwarmConsensus는 선택적 의존성 — 순환 임포트 방지를 위해 TYPE_CHECKING 사용
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.agents.swarm import SwarmConsensus
+    from src.agents.models import AgentContext
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,12 +25,14 @@ class Executor:
         trade_repo: TradeRepository,
         notify_callback: Any | None = None,
         market_data_repo: MarketDataRepository | None = None,
+        swarm: SwarmConsensus | None = None,
     ) -> None:
         self._brokers = brokers
         self._risk = risk_manager
         self._trade_repo = trade_repo
         self._notify = notify_callback
         self._market_repo = market_data_repo
+        self._swarm = swarm
         self.last_signals: dict[
             str, list[dict[str, Any]]
         ] = {}  # strategy_id -> signals
@@ -81,7 +89,7 @@ class Executor:
             # 4. 각 시그널 처리
             for signal in signals:
                 result = await self._process_signal(
-                    signal, strategy, broker, current_positions
+                    signal, strategy, broker, current_positions, market_data
                 )
                 if result:
                     results.append(result)
@@ -99,6 +107,7 @@ class Executor:
         strategy: Strategy,
         broker: BrokerAdapter,
         current_positions: dict[str, float],
+        market_data: dict[str, list[MarketData]] | None = None,
     ) -> dict[str, Any] | None:
         # 리스크 체크
         risk_result = self._risk.validate(
@@ -111,6 +120,38 @@ class Executor:
                 risk_result.reason,
             )
             return None
+
+        # Swarm Consensus 체크 (설정된 경우)
+        if self._swarm is not None:
+            try:
+                from src.agents.models import AgentContext
+                ctx = AgentContext(market_data={
+                    symbol: {
+                        "candles": len(candles),
+                        "last_close": candles[-1].close if candles else 0,
+                        "last_high": candles[-1].high if candles else 0,
+                        "last_low": candles[-1].low if candles else 0,
+                        "last_volume": candles[-1].volume if candles else 0,
+                    }
+                    for symbol, candles in (market_data or {}).items()
+                    if candles
+                })
+                consensus = await self._swarm.evaluate(signal, ctx)
+                if not consensus.approved:
+                    logger.info(
+                        "Signal rejected by swarm consensus [%s]: %s",
+                        consensus.quorum_str,
+                        consensus.summary,
+                    )
+                    return None
+                logger.info(
+                    "Signal approved by swarm consensus [%s]",
+                    consensus.quorum_str,
+                )
+            except Exception as exc:
+                # 합의 실패 시 안전하게 신호 차단 (fail-closed)
+                logger.error("Swarm consensus error — signal blocked: %s", exc)
+                return None
 
         # 주문 실행
         if signal.side == "buy":

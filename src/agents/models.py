@@ -75,3 +75,54 @@ class AgentContext:
     current_params: dict[str, Any] = field(default_factory=dict)
     backtest_result: dict[str, Any] | None = None
     analysis: AnalysisResult | None = None
+
+
+# ---------------------------------------------------------------------------
+# Swarm Consensus 모델
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SignalVote:
+    """개별 에이전트의 투표 결과"""
+
+    agent_role: str                              # "technical" | "risk_guard" | "contrarian"
+    vote: Literal["approve", "reject", "abstain"]
+    confidence: float                            # 0.0 ~ 1.0
+    reasoning: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent_role": self.agent_role,
+            "vote": self.vote,
+            "confidence": self.confidence,
+            "reasoning": self.reasoning,
+        }
+
+
+@dataclass
+class ConsensusResult:
+    """Swarm 합의 결과"""
+
+    approved: bool
+    votes: list[SignalVote] = field(default_factory=list)
+    summary: str = ""
+
+    @property
+    def approve_count(self) -> int:
+        return sum(1 for v in self.votes if v.vote == "approve")
+
+    @property
+    def reject_count(self) -> int:
+        return sum(1 for v in self.votes if v.vote == "reject")
+
+    @property
+    def quorum_str(self) -> str:
+        return f"{self.approve_count}/{len(self.votes)}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "approved": self.approved,
+            "quorum": self.quorum_str,
+            "summary": self.summary,
+            "votes": [v.to_dict() for v in self.votes],
+        }

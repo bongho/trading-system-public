@@ -61,26 +61,39 @@ graph TB
     SCH -->|daily report| DC
 ```
 
-### Trade Execution Flow
+### Trade Execution Flow (with Swarm Consensus)
 
 ```mermaid
 sequenceDiagram
     participant S as Strategy
-    participant A as AI Agent (optional)
     participant E as Executor
     participant R as RiskManager
+    participant SW as Swarm Consensus
+    participant T as Technical Agent
+    participant RG as Risk Guard Agent
+    participant C as Contrarian Agent
     participant B as Broker (Kiwoom/Upbit)
     participant D as DB
 
-    S->>E: TradeSignal(symbol, side, amount)
-    opt AI review enabled
-        E->>A: review_signal(signal, market_context)
-        A-->>E: approved / rejected / modified
-    end
+    S->>E: TradeSignal(symbol, side, confidence)
     E->>R: check_risk(signal, portfolio)
-    R-->>E: approved (within daily loss & position limits)
-    E->>B: buy(symbol, amount) / sell(symbol, volume)
-    B-->>E: TradeResult(order_id, price, volume)
+    R-->>E: approved
+
+    opt SWARM_ENABLED=true
+        E->>SW: evaluate(signal, market_ctx)
+        par parallel votes
+            SW->>T: vote(signal)
+            SW->>RG: vote(signal)
+            SW->>C: vote(signal)
+        end
+        T-->>SW: approve/reject/abstain
+        RG-->>SW: approve/reject/abstain
+        C-->>SW: approve/reject/abstain
+        SW-->>E: ConsensusResult (2/3 quorum)
+    end
+
+    E->>B: buy / sell
+    B-->>E: TradeResult
     E->>D: save trade record
     E-->>Telegram: notify trade
 ```
@@ -313,6 +326,40 @@ docker pull ghcr.io/bongho/trading-system-public:main
 pytest -v
 pytest --cov=src --cov-report=term-missing
 ```
+
+---
+
+## Roadmap
+
+```mermaid
+gantt
+    title Trading System Roadmap
+    dateFormat YYYY-MM
+    axisFormat %Y-%m
+
+    section Core
+    Broker abstraction (Upbit + Kiwoom)  :done, 2025-03, 1M
+    Strategy engine + 3 strategies       :done, 2025-03, 1M
+    Risk manager + Executor              :done, 2025-03, 1M
+    Telegram bot + Discord reporter      :done, 2025-03, 1M
+
+    section AI Layer
+    Evaluator-Optimizer orchestrator     :done, 2025-03, 1M
+    Swarm Consensus (3-agent voting)     :done, 2025-04, 1M
+    PSO parameter optimization           :active, pso, 2025-05, 2M
+    Adaptive strategy allocation         :alloc, after pso, 2M
+```
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| 1 | Upbit broker + basic strategy engine | ✅ Done |
+| 2 | SimpleRSI strategy + backtesting | ✅ Done |
+| 3 | Discord daily report + Telegram bot | ✅ Done |
+| 4 | DoubleBB & SqueezeMTF strategies + Kiwoom REST API | ✅ Done |
+| 5 | AI Agent (Evaluator-Optimizer loop) | ✅ Done |
+| **6** | **Swarm Consensus — 3-agent signal voting** | ✅ **Done** |
+| 7 | PSO parameter auto-optimization (weekly) | 🔜 Planned |
+| 8 | Adaptive strategy capital allocation | 🔜 Planned |
 
 ---
 

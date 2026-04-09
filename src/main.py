@@ -152,6 +152,7 @@ async def main() -> None:
         agent_backend = ClaudeDirectBackend(api_key=settings.anthropic_api_key)
         logger.info("AI Agent backend: Claude Direct")
 
+    swarm = None
     if agent_backend:
         sandbox = Sandbox()
         orchestrator = AgentOrchestrator(
@@ -163,7 +164,22 @@ async def main() -> None:
             collector=collector,
         )
         logger.info("AI Agent orchestrator initialized")
+
+        # 6b. Swarm Consensus (Phase 6) — 신호 실행 전 3-에이전트 합의
+        if settings.swarm_enabled:
+            from src.agents.swarm import SwarmConsensus
+            swarm = SwarmConsensus(
+                backend=agent_backend,
+                quorum=settings.swarm_quorum,
+                min_signal_confidence=settings.swarm_min_confidence,
+            )
+            logger.info(
+                "Swarm consensus enabled (quorum=%d/3, min_confidence=%.1f)",
+                settings.swarm_quorum,
+                settings.swarm_min_confidence,
+            )
     else:
+        orchestrator = None
         logger.warning("No AI API key configured — AI agent disabled")
 
     # 6b. Telegram Bot (알림 콜백으로 사용)
@@ -193,6 +209,7 @@ async def main() -> None:
         trade_repo=trade_repo,
         notify_callback=notifier.notify_trade,
         market_data_repo=market_repo,
+        swarm=swarm,
     )
     bot.executor = executor
 
