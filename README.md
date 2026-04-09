@@ -186,6 +186,99 @@ DB_PATH=data/trading.db
 
 ---
 
+## Secrets Management
+
+This system handles real financial credentials. Follow the guidelines below for each environment.
+
+### What to protect
+
+| Variable | Risk if leaked |
+|----------|---------------|
+| `UPBIT_ACCESS_KEY` / `SECRET_KEY` | Unauthorized crypto trades, fund withdrawal |
+| `KIWOOM_APP_KEY` / `APP_SECRET` | Unauthorized stock orders on your account |
+| `KIWOOM_ACCOUNT_NO` | Account impersonation |
+| `TELEGRAM_BOT_TOKEN` | Bot hijacking, fake alerts sent to you |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Unlimited API usage billed to you |
+
+### By environment
+
+#### Local development
+```bash
+# .env is already in .gitignore — never remove this line
+cp .env.example .env
+chmod 600 .env          # restrict read permission to owner only
+
+# Verify nothing sensitive is staged before committing
+git diff --staged | grep -E "(KEY|SECRET|TOKEN|PASSWORD)" && echo "WARNING: secret detected"
+```
+
+#### Docker (self-hosted server)
+Use an `.env` file on the server, outside the repo directory:
+
+```bash
+# On the server
+mkdir -p /etc/trading-system
+vim /etc/trading-system/.env        # fill in credentials
+chmod 600 /etc/trading-system/.env
+
+# docker-compose.yml already uses env_file: .env
+# Override path at runtime:
+docker compose --env-file /etc/trading-system/.env up -d
+```
+
+Alternatively, use **Docker secrets** for production deployments (Docker Swarm):
+
+```yaml
+# docker-compose.yml (Swarm mode)
+secrets:
+  upbit_access_key:
+    external: true
+
+services:
+  trading-engine:
+    secrets:
+      - upbit_access_key
+```
+
+#### GitHub Actions CI/CD
+The workflow only needs `GITHUB_TOKEN` (auto-provided) for pushing to GHCR. No trading credentials are needed at build time.
+
+If you add deployment steps, store credentials as **GitHub Actions Secrets** (never in workflow YAML):
+
+```
+Repository → Settings → Secrets and variables → Actions → New repository secret
+```
+
+```yaml
+# Example: deploy step using stored secret
+- name: Deploy
+  env:
+    KIWOOM_APP_KEY: ${{ secrets.KIWOOM_APP_KEY }}
+```
+
+### API permission hardening
+
+| Broker | Recommended API permission scope |
+|--------|----------------------------------|
+| **Upbit** | Enable only: 자산조회, 주문하기 — disable 출금(withdrawal) |
+| **Kiwoom** | Use paper trading (`KIWOOM_IS_PAPER=true`) until strategy is validated in production |
+
+### Secret rotation checklist
+
+- [ ] Rotate Upbit API keys every 90 days (Upbit enforces expiry)
+- [ ] Regenerate Kiwoom appkey if server IP changes
+- [ ] Revoke and reissue Telegram bot token if the server is compromised
+- [ ] Review OpenAI/Anthropic usage dashboard for anomalies monthly
+
+### If a secret is leaked
+
+1. **Immediately revoke** the key on the issuing platform
+2. Audit recent API call logs for unauthorized activity
+3. Issue a new key and update `.env` on all running instances
+4. If Upbit: check withdrawal history and contact support if needed
+
+---
+
 ## Kiwoom REST API
 
 This project uses the official **Kiwoom Securities REST API** (`api.kiwoom.com`), not the legacy OpenAPI+.

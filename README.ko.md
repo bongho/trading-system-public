@@ -187,6 +187,98 @@ DB_PATH=data/trading.db
 
 ---
 
+## 민감 정보 관리
+
+이 시스템은 실제 금융 자격증명을 다룹니다. 환경별 아래 지침을 반드시 준수하세요.
+
+### 보호 대상 변수
+
+| 변수 | 유출 시 피해 |
+|------|-------------|
+| `UPBIT_ACCESS_KEY` / `SECRET_KEY` | 무단 암호화폐 거래, 출금 |
+| `KIWOOM_APP_KEY` / `APP_SECRET` | 무단 주식 주문 |
+| `KIWOOM_ACCOUNT_NO` | 계좌 도용 |
+| `TELEGRAM_BOT_TOKEN` | 봇 탈취, 가짜 알림 발송 |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | 무제한 API 비용 청구 |
+
+### 환경별 관리 방법
+
+#### 로컬 개발 환경
+```bash
+# .env는 이미 .gitignore에 포함 — 이 줄을 절대 제거하지 마세요
+cp .env.example .env
+chmod 600 .env          # 소유자만 읽기 가능하도록 권한 제한
+
+# 커밋 전 민감 정보 유출 여부 확인
+git diff --staged | grep -E "(KEY|SECRET|TOKEN|PASSWORD)" && echo "경고: 시크릿 감지됨"
+```
+
+#### Docker (자체 서버)
+`.env` 파일을 레포 디렉토리 밖에 별도 보관합니다:
+
+```bash
+# 서버에서
+mkdir -p /etc/trading-system
+vim /etc/trading-system/.env        # 자격증명 입력
+chmod 600 /etc/trading-system/.env
+
+# 실행 시 경로 지정
+docker compose --env-file /etc/trading-system/.env up -d
+```
+
+Docker Swarm을 사용하는 경우 **Docker secrets**로 관리:
+
+```yaml
+# docker-compose.yml (Swarm 모드)
+secrets:
+  upbit_access_key:
+    external: true
+
+services:
+  trading-engine:
+    secrets:
+      - upbit_access_key
+```
+
+#### GitHub Actions CI/CD
+워크플로우는 GHCR 푸시에만 `GITHUB_TOKEN`(자동 제공)이 필요합니다. 빌드 시 거래 자격증명은 불필요합니다.
+
+배포 단계를 추가할 경우, 자격증명은 반드시 **GitHub Actions Secrets**에 저장하세요 (워크플로우 YAML에 직접 작성 금지):
+
+```
+레포 → Settings → Secrets and variables → Actions → New repository secret
+```
+
+```yaml
+# 배포 단계 예시
+- name: Deploy
+  env:
+    KIWOOM_APP_KEY: ${{ secrets.KIWOOM_APP_KEY }}
+```
+
+### API 권한 최소화
+
+| 브로커 | 권장 API 권한 범위 |
+|--------|------------------|
+| **업비트** | 자산조회 + 주문하기만 활성화 — **출금 권한은 반드시 비활성화** |
+| **키움증권** | 전략 검증 완료 전까지 모의투자 사용 (`KIWOOM_IS_PAPER=true`) |
+
+### 시크릿 교체 주기 체크리스트
+
+- [ ] 업비트 API 키: 90일마다 교체 (업비트 자체 만료 정책)
+- [ ] 키움 AppKey: 서버 IP 변경 시 재발급
+- [ ] 텔레그램 봇 토큰: 서버 침해 의심 시 즉시 재발급
+- [ ] OpenAI/Anthropic: 월 1회 사용량 대시보드 이상 여부 확인
+
+### 시크릿 유출 시 대응 절차
+
+1. **즉시 해당 플랫폼에서 키 폐기** (revoke)
+2. 최근 API 호출 로그에서 무단 활동 감사
+3. 새 키 발급 후 실행 중인 모든 인스턴스의 `.env` 갱신
+4. 업비트의 경우: 출금 내역 확인, 이상 시 고객센터 신고
+
+---
+
 ## 키움증권 REST API
 
 이 프로젝트는 구 OpenAPI+(HTS 연동)가 아닌 **키움증권 신 REST API** (`api.kiwoom.com`)를 사용합니다.
