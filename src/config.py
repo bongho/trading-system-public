@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     # Kiwoom (Phase 4)
     kiwoom_app_key: str = ""
     kiwoom_app_secret: str = ""
-    kiwoom_access_token: str = ""
     kiwoom_account_no: str = ""
     kiwoom_is_paper: bool = True
 

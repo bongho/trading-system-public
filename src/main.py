@@ -73,7 +73,6 @@ async def main() -> None:
             "kiwoom",
             app_key=settings.kiwoom_app_key,
             app_secret=settings.kiwoom_app_secret,
-            access_token=settings.kiwoom_access_token,
             account_no=settings.kiwoom_account_no,
             is_paper=settings.kiwoom_is_paper,
         )

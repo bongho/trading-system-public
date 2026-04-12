@@ -15,6 +15,10 @@ class AgentBackend(ABC):
     """
 
     @abstractmethod
+    async def _call(self, system: str, user_message: str, max_tokens: int = 2048) -> str:
+        """LLM 단일 호출 — 모든 백엔드 구현체가 반드시 제공해야 한다."""
+
+    @abstractmethod
     async def analyze(self, symbol: str, ctx: AgentContext) -> AnalysisResult:
         """시장 분석 (Analyst 페르소나)"""
 

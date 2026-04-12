@@ -126,13 +126,7 @@ class SwarmConsensus:
         """단일 에이전트 호출 → SignalVote 반환."""
         system_prompt = self._prompts[role]
 
-        # AgentBackend는 현재 analyze/optimize/review만 정의되어 있으므로
-        # 내부적으로 Claude/OpenAI SDK를 직접 호출하는 대신
-        # backend의 _call 메서드를 활용한다 (덕 타이핑)
-        if hasattr(self._backend, "_call"):
-            raw = await self._backend._call(system_prompt, user_msg, max_tokens=512)
-        else:
-            raise RuntimeError(f"Backend {type(self._backend).__name__} does not support _call")
+        raw = await self._backend._call(system_prompt, user_msg, max_tokens=512)
 
         data = _extract_json(raw)
         vote_val = data.get("vote", "abstain")
