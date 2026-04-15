@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import aiosqlite
@@ -11,6 +12,8 @@ from src.brokers.base import MarketData
 from src.data.collector import MarketDataCollector
 from src.db.repository import MarketDataRepository
 from src.db.schema import SCHEMA_SQL
+
+KST = timezone(timedelta(hours=9))
 
 
 def _candle(symbol: str, ts: str, close: float) -> MarketData:
@@ -22,8 +25,10 @@ def _candle(symbol: str, ts: str, close: float) -> MarketData:
 
 
 def _make_candles(symbol: str, count: int, base_close: float = 90000000) -> list[MarketData]:
+    # 현재 시간 기준으로 count*5분 전부터 생성 — get_candles()의 since 범위 내에 포함되도록
+    base_dt = datetime.now(KST) - timedelta(minutes=count * 5)
     return [
-        _candle(symbol, f"2026-03-{(i // 288 + 1):02d}T{(i % 288 * 5 // 60):02d}:{(i % 288 * 5 % 60):02d}:00", base_close + i * 1000)
+        _candle(symbol, (base_dt + timedelta(minutes=i * 5)).strftime("%Y-%m-%dT%H:%M:%S"), base_close + i * 1000)
         for i in range(count)
     ]
 
