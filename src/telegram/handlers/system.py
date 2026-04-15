@@ -37,12 +37,14 @@ def _make_handler(bot: TradingBot, handler):
     return wrapper
 
 
+@authorized_only
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "🤖 자동매매 시스템 봇입니다.\n/help 로 명령어를 확인하세요."
     )
 
 
+@authorized_only
 async def _help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = """📖 명령어 목록
 

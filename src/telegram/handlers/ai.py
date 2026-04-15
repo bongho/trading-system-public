@@ -90,7 +90,7 @@ async def _analyze(
     )
 
     text = (
-        f"{sentiment_emoji} **{result.symbol} 분석 결과**\n"
+        f"{sentiment_emoji} 〈 {result.symbol} 분석 결과 〉\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"심리: {result.sentiment.upper()} (신뢰도: {result.confidence:.0%})\n\n"
         f"📝 {result.summary}\n"
@@ -136,7 +136,7 @@ async def _optimize(
 
     if result.success and result.review and result.review.approved:
         text = (
-            f"✅ **최적화 제안 승인** (Round {result.rounds})\n"
+            f"✅ 최적화 제안 승인 (Round {result.rounds})\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"전략: {strategy_id}\n"
             f"리스크: {result.review.risk_score:.0%}\n\n"
@@ -159,7 +159,7 @@ async def _optimize(
         text = f"ℹ️ {result.error}"
     else:
         text = (
-            f"❌ **최적화 실패** (Round {result.rounds})\n"
+            f"❌ 최적화 실패 (Round {result.rounds})\n"
             f"사유: {result.error}\n"
         )
         if result.review:
@@ -191,7 +191,7 @@ async def _review(
 
     status = "✅ 양호" if result.approved else "⚠️ 주의 필요"
     text = (
-        f"{status} **{strategy_id} 검토 결과**\n"
+        f"{status} 〈 {strategy_id} 검토 결과 〉\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"리스크 점수: {result.risk_score:.0%}\n"
     )
@@ -212,7 +212,7 @@ async def _status(update: Update, bot: TradingBot) -> None:
         await update.message.reply_text("📋 대기 중인 AI 제안이 없습니다.")
         return
 
-    text = f"📋 **대기 중인 제안** ({len(pending)}건)\n━━━━━━━━━━━━━━━━━━━━\n"
+    text = f"📋 대기 중인 제안 ({len(pending)}건)\n━━━━━━━━━━━━━━━━━━━━\n"
     for sid, result in pending.items():
         strategy = result.proposal.strategy_id if result.proposal else "?"
         text += (
