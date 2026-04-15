@@ -72,7 +72,7 @@ class UpbitAdapter(BrokerAdapter):
             data = await resp.json()
             if resp.status != 200 and resp.status != 201:
                 error_msg = data.get("error", {}).get("message", str(data))
-                logger.error("Upbit API error: %s %s -> %s", method, path, error_msg)
+                logger.warning("Upbit API error: %s %s -> %s", method, path, error_msg)
                 raise RuntimeError(f"Upbit API error: {error_msg}")
             return data
 
@@ -145,6 +145,7 @@ class UpbitAdapter(BrokerAdapter):
                 try:
                     current_price = await self.get_current_price(symbol)
                 except Exception:
+                    logger.warning("현재가 조회 실패 (상장폐지/거래중단 가능), avg_price 사용: %s", symbol)
                     current_price = avg_price
 
                 items.append(
