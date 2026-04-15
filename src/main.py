@@ -209,6 +209,7 @@ async def main() -> None:
         notify_callback=notifier.notify_trade,
         market_data_repo=market_repo,
         swarm=swarm,
+        dry_run=settings.dry_run,
     )
     bot.executor = executor
 

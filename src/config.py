@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     db_path: str = "data/trading.db"
 
     # Trading
+    dry_run: bool = Field(default=False, description="True: 신호 생성만, 실제 주문 없음")
     max_daily_loss_pct: float = Field(default=0.10, description="일일 최대 손실률")
     max_position_pct: float = Field(default=0.30, description="전략당 최대 포지션 비율")
     default_interval_minutes: int = 5

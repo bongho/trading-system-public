@@ -26,6 +26,7 @@ class Executor:
         notify_callback: Any | None = None,
         market_data_repo: MarketDataRepository | None = None,
         swarm: SwarmConsensus | None = None,
+        dry_run: bool = False,
     ) -> None:
         self._brokers = brokers
         self._risk = risk_manager
@@ -33,6 +34,7 @@ class Executor:
         self._notify = notify_callback
         self._market_repo = market_data_repo
         self._swarm = swarm
+        self._dry_run = dry_run
         self.last_signals: dict[
             str, list[dict[str, Any]]
         ] = {}  # strategy_id -> signals
@@ -152,6 +154,23 @@ class Executor:
                 # 합의 실패 시 안전하게 신호 차단 (fail-closed)
                 logger.error("Swarm consensus error — signal blocked: %s", exc)
                 return None
+
+        # dry_run: 신호 승인 확인만, 실제 주문 없음
+        if self._dry_run:
+            logger.info(
+                "DRY RUN: signal approved, no trade [%s %s amount=%.0f conf=%.2f]",
+                signal.side, signal.symbol, signal.amount, signal.confidence,
+            )
+            return {
+                "dry_run": True,
+                "signal": {
+                    "side": signal.side,
+                    "symbol": signal.symbol,
+                    "amount": signal.amount,
+                    "confidence": signal.confidence,
+                    "reason": signal.reason,
+                },
+            }
 
         # 주문 실행
         if signal.side == "buy":
