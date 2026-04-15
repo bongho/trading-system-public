@@ -74,10 +74,10 @@ class KiwoomAdapter(BrokerAdapter):
 
     async def _ensure_token(self) -> None:
         """토큰이 없거나 만료 임박이면 재발급."""
-        if datetime.utcnow() < self._token_expires_at - self._TOKEN_REFRESH_BUFFER:
+        if self._token and datetime.utcnow() < self._token_expires_at - self._TOKEN_REFRESH_BUFFER:
             return
         async with self._token_lock:
-            if datetime.utcnow() < self._token_expires_at - self._TOKEN_REFRESH_BUFFER:
+            if self._token and datetime.utcnow() < self._token_expires_at - self._TOKEN_REFRESH_BUFFER:
                 return
             url = f"{self._base_url}/oauth2/token"
             payload = {
@@ -296,7 +296,7 @@ class KiwoomAdapter(BrokerAdapter):
             api_id = "ka10081"
             body = {
                 "stk_cd": symbol,
-                "base_dt": "",
+                "base_dt": datetime.now().strftime("%Y%m%d"),
                 "upd_stkpc_tp": "1",
             }
 
