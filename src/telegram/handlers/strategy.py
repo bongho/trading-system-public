@@ -15,10 +15,10 @@ from src.utils.formatters import (
 )
 from telegram import Update
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from src.telegram.bot import TradingBot
-
-logger = logging.getLogger(__name__)
 
 
 def register_strategy_handlers(bot: TradingBot) -> None:
@@ -85,10 +85,60 @@ async def _strategy(
         else:
             await update.message.reply_text(f"❌ 전략을 찾을 수 없음: {strategy_id}")
 
+    elif action == "new":
+        description = " ".join(args[1:]).strip()
+        if not description:
+            await update.message.reply_text(
+                "사용법: /strategy new <전략 설명>\n"
+                "예시: /strategy new RSI 30 이하면 BTC 매수, 70 이상이면 매도"
+            )
+            return
+
+        orchestrator = getattr(bot, "orchestrator", None)
+        if not orchestrator:
+            await update.message.reply_text("❌ AI 에이전트가 설정되지 않았습니다.")
+            return
+
+        await update.message.reply_text(f"🤖 전략 생성 중...\n설명: {description}")
+
+        async def notify(msg: str) -> None:
+            await update.message.reply_text(msg)
+
+        try:
+            session_id, meta = await orchestrator.create_new_strategy(
+                description, notify_callback=notify
+            )
+            bt = meta["backtest"]
+            pnl_emoji = "📈" if bt["total_pnl"] >= 0 else "📉"
+            text = (
+                f"✅ 전략 생성 완료!\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"ID: {meta['strategy_id']}\n"
+                f"이름: {meta['strategy_name']}\n"
+                f"브로커: {meta['broker']}\n"
+                f"심볼: {', '.join(meta['symbols'])}\n"
+                f"간격: {meta['interval_minutes']}분\n"
+                f"초기 자본: {format_krw(meta['capital_allocation'])}\n"
+                f"\n{pnl_emoji} 백테스트 (30일)\n"
+                f"  총 손익: {format_pnl(bt['total_pnl'])} ({format_pct(bt['total_pnl_pct'])})\n"
+                f"  총 매매: {bt['total_trades']}건\n"
+                f"  승률: {bt['win_rate']:.1f}%\n"
+                f"  MDD: {format_pct(bt['max_drawdown'])}\n"
+                f"  샤프: {bt['sharpe_ratio']:.2f}\n"
+                f"\n⏳ 등록하려면:\n"
+                f"/ai confirm {session_id}\n"
+                f"/ai cancel {session_id}"
+            )
+            await update.message.reply_text(text)
+        except Exception as e:
+            logger.error("Strategy generation failed: %s", e, exc_info=True)
+            await update.message.reply_text(f"❌ 전략 생성 실패: {e}")
+
     else:
         await update.message.reply_text(
             "사용법:\n"
             "/strategy list - 목록\n"
+            "/strategy new <설명> - AI 전략 생성\n"
             "/strategy pause <id> - 일시 정지\n"
             "/strategy resume <id> - 재개"
         )

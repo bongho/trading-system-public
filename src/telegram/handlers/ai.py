@@ -10,7 +10,10 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from telegram import Update
@@ -208,16 +211,27 @@ async def _review(
 async def _status(update: Update, bot: TradingBot) -> None:
     """/ai status — 대기 중인 제안 목록"""
     pending = bot.orchestrator.get_pending_proposals()
-    if not pending:
+    pending_new = bot.orchestrator.get_pending_new_strategies()
+    total = len(pending) + len(pending_new)
+
+    if not total:
         await update.message.reply_text("📋 대기 중인 AI 제안이 없습니다.")
         return
 
-    text = f"📋 대기 중인 제안 ({len(pending)}건)\n━━━━━━━━━━━━━━━━━━━━\n"
+    text = f"📋 대기 중인 제안 ({total}건)\n━━━━━━━━━━━━━━━━━━━━\n"
     for sid, result in pending.items():
         strategy = result.proposal.strategy_id if result.proposal else "?"
         text += (
-            f"\n🔹 {sid}\n"
+            f"\n🔹 [최적화] {sid}\n"
             f"  전략: {strategy}\n"
+            f"  /ai confirm {sid}\n"
+            f"  /ai cancel {sid}\n"
+        )
+    for sid, meta in pending_new.items():
+        text += (
+            f"\n🆕 [신규] {sid}\n"
+            f"  ID: {meta['strategy_id']}\n"
+            f"  이름: {meta['strategy_name']}\n"
             f"  /ai confirm {sid}\n"
             f"  /ai cancel {sid}\n"
         )
@@ -233,13 +247,78 @@ async def _confirm(
         return
 
     session_id = args[0]
-    await update.message.reply_text("⏳ 제안 적용 중...")
+    await update.message.reply_text("⏳ 적용 중...")
 
+    # 최적화 제안 먼저 시도
     success = await bot.orchestrator.confirm_proposal(session_id)
     if success:
-        await update.message.reply_text("✅ 제안이 성공적으로 적용되었습니다.")
-    else:
+        await update.message.reply_text("✅ 최적화 제안이 성공적으로 적용되었습니다.")
+        return
+
+    # 신규 전략 시도
+    meta = await bot.orchestrator.confirm_new_strategy(session_id)
+    if not meta:
         await update.message.reply_text("❌ 제안을 찾을 수 없거나 적용에 실패했습니다.")
+        return
+
+    strategy_id = meta["strategy_id"]
+    try:
+        # 동적 임포트
+        importlib.invalidate_caches()
+        module_name = f"src.strategies.{strategy_id}"
+        try:
+            mod = importlib.import_module(module_name)
+        except ImportError:
+            path = Path(f"src/strategies/{strategy_id}.py")
+            spec = importlib.util.spec_from_file_location(strategy_id, path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+
+        strategy = mod.create_strategy(
+            capital_allocation=meta["capital_allocation"]
+        )
+
+        # 레지스트리 등록
+        bot.registry.register(strategy)
+
+        # DB 저장
+        await bot.strategy_repo.upsert_strategy(
+            id=strategy_id,
+            name=meta["strategy_name"],
+            broker=meta["broker"],
+            symbols=meta["symbols"],
+            capital_allocation=meta["capital_allocation"],
+            interval_minutes=meta["interval_minutes"],
+            enabled=True,
+            code_path=f"src/strategies/{strategy_id}.py",
+        )
+
+        # 스케줄러 등록
+        scheduler = getattr(bot, "scheduler", None)
+        if scheduler:
+            scheduler.add_strategy(strategy_id, meta["interval_minutes"])
+            scheduled_text = f"  스케줄: {meta['interval_minutes']}분마다 실행\n"
+        else:
+            scheduled_text = "  (스케줄러 미연결 — 재시작 후 자동 실행)\n"
+
+        bt = meta["backtest"]
+        pnl_emoji = "📈" if bt["total_pnl"] >= 0 else "📉"
+        await update.message.reply_text(
+            f"✅ 신규 전략 등록 완료!\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"ID: {strategy_id}\n"
+            f"이름: {meta['strategy_name']}\n"
+            f"브로커: {meta['broker']}\n"
+            f"심볼: {', '.join(meta['symbols'])}\n"
+            f"{scheduled_text}"
+            f"\n{pnl_emoji} 백테스트 참고\n"
+            f"  손익: {bt['total_pnl_pct']:.1f}% | "
+            f"승률: {bt['win_rate']:.1f}% | "
+            f"샤프: {bt['sharpe_ratio']:.2f}"
+        )
+    except Exception as e:
+        logger.error("New strategy confirm failed: %s", e, exc_info=True)
+        await update.message.reply_text(f"❌ 전략 등록 실패: {e}")
 
 
 async def _cancel(

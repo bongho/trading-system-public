@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from src.agents.models import AgentContext, AnalysisResult, OptimizeResult, ReviewResult
 
@@ -33,6 +34,14 @@ class AgentBackend(ABC):
         self, proposal: OptimizeResult, ctx: AgentContext
     ) -> ReviewResult:
         """변경안 검토 (Reviewer 페르소나)"""
+
+    async def generate_strategy(self, description: str) -> dict[str, Any]:
+        """자연어 설명에서 전략 코드 생성.
+
+        반환: {strategy_id, strategy_name, broker, symbols,
+               interval_minutes, capital_allocation, code}
+        """
+        raise NotImplementedError
 
     async def close(self) -> None:
         """리소스 정리"""

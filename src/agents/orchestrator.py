@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
+import shutil
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from src.agents.backend import AgentBackend
@@ -65,6 +68,8 @@ class AgentOrchestrator:
         self._collector = collector
         # 승인 대기 중인 제안 (Telegram /confirm 연동)
         self._pending_proposals: dict[str, OrchestratorResult] = {}
+        # 신규 전략 생성 대기 (Telegram /strategy new → /ai confirm)
+        self._pending_new_strategies: dict[str, dict[str, Any]] = {}
 
     async def analyze(self, symbol: str) -> AnalysisResult:
         """단독 분석 실행 (/ai analyze)"""
@@ -212,13 +217,119 @@ class AgentOrchestrator:
         return True
 
     def cancel_proposal(self, session_id: str) -> bool:
-        """제안 취소."""
-        removed = self._pending_proposals.pop(session_id, None)
-        return removed is not None
+        """제안 취소 (최적화 제안 또는 신규 전략 모두 처리)."""
+        if self._pending_proposals.pop(session_id, None) is not None:
+            return True
+        meta = self._pending_new_strategies.pop(session_id, None)
+        if meta:
+            # sandbox 파일 정리
+            self._sandbox.cleanup(meta["strategy_id"])
+            return True
+        return False
 
     def get_pending_proposals(self) -> dict[str, OrchestratorResult]:
-        """대기 중인 제안 목록."""
+        """대기 중인 최적화 제안 목록."""
         return dict(self._pending_proposals)
+
+    def get_pending_new_strategies(self) -> dict[str, dict[str, Any]]:
+        """대기 중인 신규 전략 목록."""
+        return dict(self._pending_new_strategies)
+
+    async def create_new_strategy(
+        self,
+        description: str,
+        capital_allocation: float = 100000,
+        notify_callback: Any | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """자연어 설명으로 전략 생성 → sandbox 백테스트 → 승인 대기.
+
+        Returns:
+            (session_id, metadata) — metadata에 backtest 결과 포함
+        """
+        session_id = uuid.uuid4().hex[:12]
+
+        if notify_callback:
+            await notify_callback("🤖 전략 코드 생성 중...")
+
+        # 1. Claude로 코드 생성
+        raw = await self._backend.generate_strategy(description)
+        strategy_id = raw["strategy_id"]
+        code = raw["code"]
+
+        # 2. sandbox에 코드 저장
+        sandbox_path = self._sandbox._sandbox / f"{strategy_id}.py"
+        sandbox_path.write_text(code, encoding="utf-8")
+
+        # 3. syntax 검증 + create_strategy() 존재 확인
+        spec = importlib.util.spec_from_file_location(
+            f"sandbox_{strategy_id}", str(sandbox_path)
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # SyntaxError 시 여기서 발생
+
+        if not hasattr(module, "create_strategy"):
+            sandbox_path.unlink(missing_ok=True)
+            raise AttributeError(f"create_strategy() not found in generated code")
+
+        # 4. 백테스트
+        if notify_callback:
+            await notify_callback("📊 백테스트 실행 중 (30일)...")
+
+        alloc = float(raw.get("capital_allocation", capital_allocation))
+        strategy_obj = module.create_strategy(capital_allocation=alloc)
+
+        symbol = raw["symbols"][0] if raw.get("symbols") else "KRW-BTC"
+        broker_name = raw.get("broker", "upbit")
+        data = await self._get_historical_data(symbol, broker_name, days=30)
+
+        backtest_result = BacktestResult()
+        if data:
+            try:
+                backtest_result = await strategy_obj.backtest({symbol: data})
+            except Exception as e:
+                logger.warning("Backtest failed for new strategy %s: %s", strategy_id, e)
+
+        # 5. pending에 저장
+        meta: dict[str, Any] = {
+            "session_id": session_id,
+            "description": description,
+            "strategy_id": strategy_id,
+            "strategy_name": raw.get("strategy_name", strategy_id),
+            "broker": broker_name,
+            "symbols": raw.get("symbols", [symbol]),
+            "interval_minutes": int(raw.get("interval_minutes", 5)),
+            "capital_allocation": alloc,
+            "code": code,
+            "backtest": self._backtest_to_dict(backtest_result),
+        }
+        self._pending_new_strategies[session_id] = meta
+
+        return session_id, meta
+
+    async def confirm_new_strategy(self, session_id: str) -> dict[str, Any] | None:
+        """신규 전략 승인 — sandbox 코드를 src/strategies/ 에 복사.
+
+        Returns:
+            strategy metadata (caller가 registry/repo/scheduler 등록 책임)
+            None: session_id 없음
+        """
+        meta = self._pending_new_strategies.pop(session_id, None)
+        if not meta:
+            return None
+
+        strategy_id = meta["strategy_id"]
+        sandbox_path = self._sandbox._sandbox / f"{strategy_id}.py"
+        dest = self._sandbox._strategies / f"{strategy_id}.py"
+
+        if sandbox_path.exists():
+            shutil.copy2(sandbox_path, dest)
+            sandbox_path.unlink(missing_ok=True)
+        else:
+            # sandbox 파일이 이미 없으면 code에서 재생성
+            dest.write_text(meta["code"], encoding="utf-8")
+
+        logger.info("New strategy promoted: %s -> %s", strategy_id, dest)
+        return meta
 
     async def _build_context(
         self,

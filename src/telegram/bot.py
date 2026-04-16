@@ -4,6 +4,8 @@ import logging
 
 from telegram.ext import Application
 
+from typing import TYPE_CHECKING
+
 from src.agents.orchestrator import AgentOrchestrator
 from src.brokers.base import BrokerAdapter
 from src.config import settings
@@ -14,6 +16,10 @@ from src.db.repository import (
 )
 from src.engine.executor import Executor
 from src.strategies.registry import StrategyRegistry
+
+if TYPE_CHECKING:
+    from src.engine.hunting import HuntingLoop
+    from src.engine.scheduler import TradingScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +42,15 @@ class TradingBot:
         self.strategy_repo = strategy_repo
         self.pending_repo = pending_repo
         self.orchestrator = orchestrator
+        self.scheduler: TradingScheduler | None = None
+        self.hunter: HuntingLoop | None = None
         self.app: Application = (
             Application.builder().token(settings.telegram_bot_token).build()
         )
 
     def setup_handlers(self) -> None:
         from src.telegram.handlers.ai import register_ai_handlers
+        from src.telegram.handlers.hunt import register_hunt_handlers
         from src.telegram.handlers.monitor import register_monitor_handlers
         from src.telegram.handlers.strategy import register_strategy_handlers
         from src.telegram.handlers.system import register_system_handlers
@@ -52,6 +61,7 @@ class TradingBot:
         register_strategy_handlers(self)
         register_monitor_handlers(self)
         register_ai_handlers(self)
+        register_hunt_handlers(self)
         logger.info("Telegram handlers registered")
 
     async def start(self) -> None:

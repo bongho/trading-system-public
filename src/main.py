@@ -221,6 +221,7 @@ async def main() -> None:
             discord_reporter.send_daily_report if discord_reporter else None
         ),
     )
+    bot.scheduler = scheduler
 
     # 10. 시작
     shutdown_event = asyncio.Event()
