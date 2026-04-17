@@ -33,9 +33,21 @@ case "$ACTION" in
 
   pull)
     echo "=== 최신 코드 반영 ==="
+
+    # pyproject.toml 변경 여부 확인 (의존성 변경 시에만 rebuild)
+    PYPROJECT_BEFORE=$(git show HEAD:pyproject.toml 2>/dev/null | md5sum)
     git pull
-    docker compose build
-    docker compose up -d
+    PYPROJECT_AFTER=$(cat pyproject.toml | md5sum)
+
+    if [ "$PYPROJECT_BEFORE" != "$PYPROJECT_AFTER" ]; then
+      echo "📦 pyproject.toml 변경 감지 → 이미지 재빌드"
+      docker compose build
+      docker compose up -d
+    else
+      echo "♻️  의존성 변경 없음 → 재시작만"
+      docker compose restart
+    fi
+
     echo "✅ 업데이트 완료"
     ;;
 

@@ -8,7 +8,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./sandbox:/app/sandbox
-      - ./src/strategies:/app/src/strategies  # hot-reload
+      - ./src:/app/src  # 코드 변경 시 restart만으로 반영 (rebuild 불필요)
     environment:
       - TZ=Asia/Seoul
       - PYTHONUNBUFFERED=1
