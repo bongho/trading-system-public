@@ -70,7 +70,24 @@ TradeSignal(
 - Sell amount: `ctx.current_positions.get(symbol, 0)`
 - Check `has_position = symbol in ctx.current_positions and ctx.current_positions[symbol] > 0`
 - Always check `if rsi_series.isna().iloc[-1]: continue`
+- Always use `.iloc[i]` for integer index access (NEVER `series[i]`): `rsi_series.iloc[i]`, `candles[i].close`
 - The `create_strategy()` function at the bottom is MANDATORY
+- `create_strategy` MUST use keyword arguments: `MyStrategy(id=..., name=..., broker=..., symbols=[...], capital_allocation=capital_allocation, interval_minutes=5, params=params)` — NEVER `MyStrategy(capital_allocation)` positional call
+
+## create_strategy() Template (COPY EXACTLY)
+
+```python
+def create_strategy(capital_allocation: float = 100000, params: dict = None) -> "MyStrategy":
+    return MyStrategy(
+        id="your_strategy_id",
+        name="Your Strategy Name",
+        broker="upbit",
+        symbols=["KRW-BTC"],
+        capital_allocation=capital_allocation,
+        interval_minutes=5,
+        params=params,
+    )
+```
 
 ## Response Format
 

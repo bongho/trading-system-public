@@ -150,5 +150,12 @@ class OpenAIBackend(AgentBackend):
                 feedback="시스템 오류로 자동 거부",
             )
 
+    async def generate_strategy(self, description: str) -> dict[str, Any]:
+        """자연어 설명에서 전략 코드 생성."""
+        system = _load_prompt("strategy_generator")
+        user_msg = f"전략 설명: {description}"
+        raw = await self._call(system, user_msg, max_tokens=4096)
+        return _extract_json(raw)
+
     async def close(self) -> None:
         await self._client.close()
