@@ -108,7 +108,9 @@ async def _status(
             }
         )
 
-    text = format_strategy_status(strategy_data)
+    from src.config import settings
+    dry_run_badge = "🔸 DRY RUN (모의)" if settings.dry_run else "🔴 실매매 ON"
+    text = f"{dry_run_badge}\n\n" + format_strategy_status(strategy_data)
 
     # 각 브로커 잔고 요약
     for broker_name, broker in bot.brokers.items():
