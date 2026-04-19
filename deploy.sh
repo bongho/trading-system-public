@@ -4,6 +4,8 @@
 
 set -e
 
+export GIT_SSH_COMMAND="ssh -i ~/.ssh/github_trading -o StrictHostKeyChecking=no"
+
 ACTION=${1:-"deploy"}
 CONTAINER="trading-engine"
 
