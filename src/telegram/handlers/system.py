@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from telegram.ext import ContextTypes
@@ -22,6 +24,7 @@ def register_system_handlers(bot: TradingBot) -> None:
     app.add_handler(CommandHandler("start", _start))
     app.add_handler(CommandHandler("help", _help))
     app.add_handler(CommandHandler("status", _make_handler(bot, _status)))
+    app.add_handler(CommandHandler("dryrun", _make_handler(bot, _dryrun)))
     app.add_handler(CommandHandler("portfolio", _make_handler(bot, _portfolio)))
     app.add_handler(CommandHandler("history", _make_handler(bot, _history)))
     app.add_handler(CommandHandler("logs", _make_handler(bot, _logs)))
@@ -81,6 +84,7 @@ async def _help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /ai cancel <id> - 제안 취소
 
 🔧 시스템
+/dryrun on|off - 모의/실매매 모드 전환
 /health - 시스템 상태 (uptime, DB, 연결)
 /logs [N] - 최근 로그"""
     await update.message.reply_text(text)
@@ -121,6 +125,61 @@ async def _status(
             text += f"\n\n❌ {broker_name.upper()}: 연결 실패 ({e})"
 
     await update.message.reply_text(text)
+
+
+@authorized_only
+async def _dryrun(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, bot: TradingBot
+) -> None:
+    """/dryrun on|off — DRY RUN 모드 전환"""
+    from src.config import settings
+
+    args = context.args or []
+    if not args:
+        current = "🔸 DRY RUN (모의)" if settings.dry_run else "🔴 실매매 ON"
+        await update.message.reply_text(
+            f"현재 상태: {current}\n\n사용법: /dryrun on 또는 /dryrun off"
+        )
+        return
+
+    mode = args[0].lower()
+    if mode not in ("on", "off"):
+        await update.message.reply_text("❌ /dryrun on 또는 /dryrun off 로 입력하세요.")
+        return
+
+    new_value = mode == "on"
+
+    # 실매매 전환 시 경고
+    if not new_value and settings.dry_run:
+        await update.message.reply_text(
+            "⚠️ 실매매 모드로 전환합니다.\n실제 주문이 나갑니다. 확인하려면 /dryrun off confirm 을 입력하세요."
+        )
+        return
+
+    if not new_value and not settings.dry_run:
+        confirm = args[1].lower() if len(args) > 1 else ""
+        if confirm != "confirm":
+            await update.message.reply_text(
+                "⚠️ 실매매 모드로 전환합니다.\n실제 주문이 나갑니다. 확인하려면 /dryrun off confirm 을 입력하세요."
+            )
+            return
+
+    # 런타임 변경
+    settings.dry_run = new_value
+    bot.executor._dry_run = new_value
+
+    # .env 파일 영구 저장
+    env_path = Path(".env")
+    if env_path.exists():
+        content = env_path.read_text()
+        if "DRY_RUN=" in content:
+            content = re.sub(r"DRY_RUN=\S*", f"DRY_RUN={str(new_value).lower()}", content)
+        else:
+            content += f"\nDRY_RUN={str(new_value).lower()}\n"
+        env_path.write_text(content)
+
+    badge = "🔸 DRY RUN (모의)" if new_value else "🔴 실매매 ON"
+    await update.message.reply_text(f"✅ 모드 변경 완료: {badge}")
 
 
 @authorized_only
