@@ -55,7 +55,7 @@ case "$ACTION" in
 
   restart)
     echo "=== 컨테이너 재시작 ==="
-    docker compose restart
+    docker compose up -d
     echo "✅ 재시작 완료"
     ;;
 
