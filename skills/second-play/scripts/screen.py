@@ -159,7 +159,7 @@ KEYWORD_MAP: dict[str, list[str]] = {
     "miner": ["btc-ai-mining"],
 }
 
-YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
+YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range}&interval={interval}"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (freedom-skill/1.0)",
     "Accept": "application/json",
@@ -177,9 +177,9 @@ def fetch_json(url: str) -> Any:
 
 
 def get_chart(symbol: str) -> dict:
-    """Yahoo Finance chart API로 단일 종목 5일치 OHLCV 조회."""
+    """단기(5d) 데이터 조회."""
     try:
-        raw = fetch_json(YAHOO_CHART.format(symbol=symbol))
+        raw = fetch_json(YAHOO_CHART.format(symbol=symbol, range="5d", interval="1d"))
         result = raw["chart"]["result"][0]
         meta = result.get("meta", {})
         quote = (result.get("indicators", {}).get("quote") or [{}])[0]
@@ -202,6 +202,40 @@ def get_chart(symbol: str) -> dict:
         return {"symbol": symbol, "error": str(e)}
 
 
+def get_chart_long(symbol: str) -> dict:
+    """장기(1y) 데이터 조회 — 1m/3m/6m/1y 수익률 및 추세 일관성 계산."""
+    try:
+        raw = fetch_json(YAHOO_CHART.format(symbol=symbol, range="1y", interval="1d"))
+        result = raw["chart"]["result"][0]
+        meta = result.get("meta", {})
+        quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+
+        closes = [c for c in (quote.get("close") or []) if c is not None]
+        n = len(closes)
+
+        # 기간별 수익률 (거래일 기준: 1m≈21d, 3m≈63d, 6m≈126d)
+        change_1m  = round(_pct(closes, max(0, n - 22), -1), 2)
+        change_3m  = round(_pct(closes, max(0, n - 64), -1), 2)
+        change_6m  = round(_pct(closes, max(0, n - 127), -1), 2)
+        change_1y  = round(_pct(closes, 0, -1), 2)
+
+        # 추세 일관성: 1m/3m/6m 중 플러스인 기간 수
+        positive_periods = sum(1 for v in [change_1m, change_3m, change_6m] if v > 0)
+
+        return {
+            "symbol": symbol,
+            "name": meta.get("shortName", symbol),
+            "price": round(meta.get("regularMarketPrice") or (closes[-1] if closes else 0), 2),
+            "change_1m_pct": change_1m,
+            "change_3m_pct": change_3m,
+            "change_6m_pct": change_6m,
+            "change_1y_pct": change_1y,
+            "trend_consistency": positive_periods,  # 0~3 (3=모든 기간 플러스)
+        }
+    except Exception as e:
+        return {"symbol": symbol, "error": str(e)}
+
+
 def _pct(closes: list[float], i: int, j: int) -> float:
     try:
         base, head = closes[i], closes[j]
@@ -211,30 +245,50 @@ def _pct(closes: list[float], i: int, j: int) -> float:
 
 
 def score_stock(data: dict, risk: str) -> float:
-    """
-    Aschenbrenner 3원칙 점수화:
-      서사 모멘텀 (60%) — 1d 주도, 5d 보조
-      로테이션 신호 (40%) — 평균 대비 거래량 비율
-      변동성 패널티   — risk=high 시 0.5x
-    """
+    """단기 스코어: 1d 모멘텀(60%) + 거래량 로테이션(40%)."""
     momentum = data.get("change_1d_pct", 0) * 0.7 + data.get("change_5d_pct", 0) * 0.3
     rotation = min((data.get("volume_ratio", 1.0) - 1.0) * 100, 100)
     raw = momentum * 0.6 + rotation * 0.4
     return round(raw * (0.5 if risk == "high" else 1.0), 3)
 
 
-def to_signal(score: float) -> str:
+def score_stock_long(data: dict, risk: str) -> float:
+    """
+    장기 스코어 (Aschenbrenner 구조적 병목 관점):
+      성장 모멘텀 (50%) — 6m(45%) + 3m(35%) + 1m(20%) 가중 평균 (장기일수록 비중↑)
+      추세 일관성 (30%) — 1m/3m/6m 중 플러스 기간 비율
+      1y 방향성  (20%) — 1년 수익률 (구조적 트렌드 확인)
+      변동성 패널티 — risk=high 시 0.5x
+    """
+    c1m = data.get("change_1m_pct", 0)
+    c3m = data.get("change_3m_pct", 0)
+    c6m = data.get("change_6m_pct", 0)
+    c1y = data.get("change_1y_pct", 0)
+    consistency = data.get("trend_consistency", 0)  # 0~3
+
+    momentum = c6m * 0.45 + c3m * 0.35 + c1m * 0.20
+    trend = (consistency / 3) * 100  # 0~100 정규화
+    direction = min(max(c1y, -50), 100)  # 1y 수익률 cap
+
+    raw = momentum * 0.50 + trend * 0.30 + direction * 0.20
+    return round(raw * (0.5 if risk == "high" else 1.0), 3)
+
+
+def to_signal(score: float, horizon: str = "short") -> str:
+    if horizon == "long":
+        # 장기: 더 높은 기준 (sustained uptrend 필요)
+        return "BUY" if score >= 8.0 else ("WATCH" if score >= 0 else "EXIT")
     return "BUY" if score >= 2.0 else ("WATCH" if score >= 0 else "EXIT")
 
 
-def fetch_and_score(symbols: list[str], risk: str, top_n: int) -> tuple[list[dict], list[dict]]:
+def fetch_and_score(symbols: list[str], risk: str, top_n: int, horizon: str = "short") -> tuple[list[dict], list[dict]]:
     """종목 리스트 조회·점수화·정렬 후 (top_n, all) 반환."""
     ranked = []
     for sym in symbols:
-        data = get_chart(sym)
+        data = get_chart_long(sym) if horizon == "long" else get_chart(sym)
         if "error" not in data:
-            s = score_stock(data, risk)
-            ranked.append({**data, "score": s, "signal": to_signal(s)})
+            s = score_stock_long(data, risk) if horizon == "long" else score_stock(data, risk)
+            ranked.append({**data, "score": s, "signal": to_signal(s, horizon), "horizon": horizon})
         time.sleep(0.08)
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked[:top_n], ranked
@@ -250,13 +304,13 @@ def bottleneck_strength(top: list[dict], top_n: int) -> str:
 # Command: screen — 표준 4대 카테고리 스크리닝
 # ---------------------------------------------------------------------------
 
-def cmd_screen(category: str, top_n: int) -> None:
+def cmd_screen(category: str, top_n: int, horizon: str = "short") -> None:
     cats = LEGACY_CATEGORIES if category == "all" else {category: LEGACY_CATEGORIES[category]}
     results: dict[str, Any] = {}
     total_buy, total_top = 0, 0
 
     for key, cfg in cats.items():
-        top, all_stocks = fetch_and_score(cfg["stocks"], cfg["risk"], top_n)
+        top, all_stocks = fetch_and_score(cfg["stocks"], cfg["risk"], top_n, horizon)
         results[key] = {"label": cfg["label"], "risk": cfg["risk"], "top": top, "all": all_stocks}
         total_buy += sum(1 for s in top if s["signal"] == "BUY")
         total_top += len(top)
@@ -264,11 +318,13 @@ def cmd_screen(category: str, top_n: int) -> None:
     strength = bottleneck_strength(
         [s for cat in results.values() for s in cat["top"]], total_top
     )
+    horizon_label = "장기(1m/3m/6m/1y)" if horizon == "long" else "단기(1d/5d)"
     print(json.dumps({
         "mode": "screen",
+        "horizon": horizon_label,
         "category": category,
         "bottleneck_strength": strength,
-        "summary": f"오늘의 AI 2차 병목 강도: {strength} ({total_buy}/{total_top} BUY)",
+        "summary": f"[{horizon_label}] AI 2차 병목 강도: {strength} ({total_buy}/{total_top} BUY)",
         "results": results,
     }, ensure_ascii=False, indent=2))
 
@@ -277,7 +333,7 @@ def cmd_screen(category: str, top_n: int) -> None:
 # Command: trends — ETF 수익률로 뜨는 병목 세부 테마 탐색
 # ---------------------------------------------------------------------------
 
-def cmd_trends(top_n: int) -> None:
+def cmd_trends(top_n: int, horizon: str = "short") -> None:
     etf_results = []
     seen_etfs: set[str] = set()
 
@@ -286,24 +342,36 @@ def cmd_trends(top_n: int) -> None:
         if etf in seen_etfs:
             continue
         seen_etfs.add(etf)
-        data = get_chart(etf)
+        data = get_chart_long(etf) if horizon == "long" else get_chart(etf)
         if "error" not in data:
-            etf_results.append({
-                "theme_key": key,
-                "label": cfg["label"],
-                "angle": cfg["angle"],
-                "etf": etf,
-                "change_1d_pct": data["change_1d_pct"],
-                "change_5d_pct": data["change_5d_pct"],
-                "volume_ratio": data["volume_ratio"],
-            })
+            if horizon == "long":
+                entry = {
+                    "theme_key": key, "label": cfg["label"], "angle": cfg["angle"], "etf": etf,
+                    "change_1m_pct": data["change_1m_pct"],
+                    "change_3m_pct": data["change_3m_pct"],
+                    "change_6m_pct": data["change_6m_pct"],
+                    "change_1y_pct": data["change_1y_pct"],
+                    "trend_consistency": data["trend_consistency"],
+                }
+                sort_key = data["change_6m_pct"]
+            else:
+                entry = {
+                    "theme_key": key, "label": cfg["label"], "angle": cfg["angle"], "etf": etf,
+                    "change_1d_pct": data["change_1d_pct"],
+                    "change_5d_pct": data["change_5d_pct"],
+                    "volume_ratio": data["volume_ratio"],
+                }
+                sort_key = data["change_5d_pct"]
+            etf_results.append({**entry, "_sort": sort_key})
         time.sleep(0.08)
 
-    etf_results.sort(key=lambda x: x["change_5d_pct"], reverse=True)
+    etf_results.sort(key=lambda x: x.pop("_sort"), reverse=True)
+    horizon_label = "장기(6m 기준)" if horizon == "long" else "단기(5d 기준)"
 
     print(json.dumps({
         "mode": "trends",
-        "note": "선택 후 → python3 screen.py discover --trend <키워드>",
+        "horizon": horizon_label,
+        "note": "선택 후 → python3 screen.py discover --trend <키워드> --horizon " + horizon,
         "top_themes": etf_results[:top_n],
         "all_themes": etf_results,
         "available_keywords": sorted(KEYWORD_MAP.keys()),
@@ -314,7 +382,7 @@ def cmd_trends(top_n: int) -> None:
 # Command: discover — 트렌드 키워드 → Aschenbrenner 렌즈로 종목 선정
 # ---------------------------------------------------------------------------
 
-def cmd_discover(trend: str, top_n: int) -> None:
+def cmd_discover(trend: str, top_n: int, horizon: str = "short") -> None:
     trend_lower = trend.lower().strip()
 
     # 키워드 매핑 (부분 매치 포함)
@@ -345,7 +413,7 @@ def cmd_discover(trend: str, top_n: int) -> None:
 
     for theme_key in matched_themes:
         cfg = BOTTLENECK_UNIVERSE[theme_key]
-        top, all_stocks = fetch_and_score(cfg["stocks"], cfg["risk"], top_n)
+        top, all_stocks = fetch_and_score(cfg["stocks"], cfg["risk"], top_n, horizon)
         results[theme_key] = {
             "label": cfg["label"],
             "angle": cfg["angle"],
@@ -357,15 +425,17 @@ def cmd_discover(trend: str, top_n: int) -> None:
 
     strength = bottleneck_strength(all_signals, len(all_signals))
     buy_count = sum(1 for s in all_signals if s["signal"] == "BUY")
+    horizon_label = "장기(1m/3m/6m/1y)" if horizon == "long" else "단기(1d/5d)"
 
     print(json.dumps({
         "mode": "discover",
+        "horizon": horizon_label,
         "trend": trend,
         "matched": True,
         "matched_themes": matched_themes,
         "bottleneck_strength": strength,
         "summary": (
-            f"'{trend}' 트렌드의 2차 병목 강도: {strength} "
+            f"[{horizon_label}] '{trend}' 트렌드의 2차 병목 강도: {strength} "
             f"({buy_count}/{len(all_signals)} BUY)"
         ),
         "results": results,
@@ -382,6 +452,8 @@ def main() -> None:
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    HORIZON_HELP = "투자 성향: short=단기(1d/5d) | long=장기(1m/3m/6m/1y) (기본: short)"
+
     # screen
     p_screen = sub.add_parser("screen", help="표준 4대 카테고리 스크리닝")
     p_screen.add_argument(
@@ -389,24 +461,27 @@ def main() -> None:
         choices=["all", "power", "datacenter", "optical", "btc-ai"],
     )
     p_screen.add_argument("--top", type=int, default=2, help="카테고리별 추천 수 (기본: 2)")
+    p_screen.add_argument("--horizon", default="short", choices=["short", "long"], help=HORIZON_HELP)
 
     # trends
     p_trends = sub.add_parser("trends", help="ETF 수익률로 병목 세부 테마 탐색")
     p_trends.add_argument("--top", type=int, default=5, help="상위 N개 테마 (기본: 5)")
+    p_trends.add_argument("--horizon", default="short", choices=["short", "long"], help=HORIZON_HELP)
 
     # discover
     p_discover = sub.add_parser("discover", help="트렌드 키워드 → 2차 병목 종목 선정")
     p_discover.add_argument("--trend", required=True, help="예: nuclear, copper, cooling, optical")
     p_discover.add_argument("--top", type=int, default=3, help="테마별 추천 수 (기본: 3)")
+    p_discover.add_argument("--horizon", default="short", choices=["short", "long"], help=HORIZON_HELP)
 
     args = p.parse_args()
 
     if args.cmd == "screen":
-        cmd_screen(args.category, args.top)
+        cmd_screen(args.category, args.top, args.horizon)
     elif args.cmd == "trends":
-        cmd_trends(args.top)
+        cmd_trends(args.top, args.horizon)
     elif args.cmd == "discover":
-        cmd_discover(args.trend, args.top)
+        cmd_discover(args.trend, args.top, args.horizon)
 
 
 if __name__ == "__main__":
