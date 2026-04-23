@@ -9,6 +9,7 @@ services:
       - ./data:/app/data
       - ./sandbox:/app/sandbox
       - ./src:/app/src  # 코드 변경 시 restart만으로 반영 (rebuild 불필요)
+      - ./skills:/app/skills  # 스킬 변경 시 재시작 없이 즉시 반영
     environment:
       - TZ=Asia/Seoul
       - PYTHONUNBUFFERED=1
