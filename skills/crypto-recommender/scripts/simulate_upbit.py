@@ -117,7 +117,9 @@ def build_message(ts_kst: str, recs: list[dict], pnl: dict[str, float]) -> str:
     hour = ts_kst[11:16]
     lines = [f'📊 <b>[업비트 단타 추천]</b> {hour} KST\n']
 
-    lines.append('🔍 <b>현재 추천 (v3)</b>')
+    filter_ok = recs[0].get('filter_passed', True) if recs else True
+    label = '🔍 <b>현재 추천 (v3)</b>' if filter_ok else '⚠️ <b>현재 추천 (v3 필터 미달 — 시장 조용)</b>'
+    lines.append(label)
     for i, r in enumerate(recs, 1):
         market = r['market']
         lines.append(

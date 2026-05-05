@@ -158,7 +158,7 @@ def recommend_upbit_spot():
     candidates = [t for t in tickers if float(t.get('signed_change_rate', 0)) * 100 > 1]
     candidates.sort(key=lambda x: float(x.get('signed_change_rate', 0)), reverse=True)
 
-    scored = []
+    scored, fallback = [], []
     for t in candidates[:25]:
         market = t['market']
         try:
@@ -185,21 +185,27 @@ def recommend_upbit_spot():
         usdt_vol = krw_vol / 1380
         s = score_v3(ch_1h, ch_15m, usdt_vol, rsi, vol_ratio, bullish,
                      rsi_lo=42, rsi_hi=70, min_vol_ratio=1.2, min_bullish=0.50)
-        if s is None:
-            continue
-        scored.append((s, t, ch_1h, ch_15m, rsi, vol_ratio))
+        row = (ch_1h, ch_15m, rsi, vol_ratio, t, usdt_vol)
+        if s is not None:
+            scored.append((s, t, ch_1h, ch_15m, rsi, vol_ratio))
+        else:
+            # 폴백: 필터 미달이지만 모멘텀 상위 후보 보관
+            fallback.append((ch_1h * 0.45 + ch_15m * 0.20, t, ch_1h, ch_15m, rsi, vol_ratio))
         time.sleep(0.15)
 
+    source = scored if scored else fallback
+    filter_passed = bool(scored)
     top = []
-    for s, t, ch_1h, ch_15m, rsi, vol_ratio in sorted(scored, key=lambda x: x[0], reverse=True)[:3]:
+    for s, t, ch_1h, ch_15m, rsi, vol_ratio in sorted(source, key=lambda x: x[0], reverse=True)[:3]:
         top.append({
-            'market':      t['market'],
-            'score':       s,
-            'change_1h':   ch_1h,
-            'change_15m':  ch_15m,
-            'rsi_14':      rsi,
-            'vol_ratio':   vol_ratio,
+            'market':         t['market'],
+            'score':          round(s, 3),
+            'change_1h':      ch_1h,
+            'change_15m':     ch_15m,
+            'rsi_14':         rsi,
+            'vol_ratio':      vol_ratio,
             'acc_volume_24h': t.get('acc_trade_volume_24h'),
+            'filter_passed':  filter_passed,
         })
     return top
 

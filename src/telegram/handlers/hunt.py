@@ -300,11 +300,13 @@ async def _upbit_recommend(
         await update.message.reply_text(f"⚠️ 조회 실패: {e}")
         return
 
+    filter_ok = top3[0].get('filter_passed', True) if top3 else False
     if not top3:
-        await update.message.reply_text("⚠️ 현재 조건을 충족하는 코인 없음 (RSI·거래량 필터 미달)")
+        await update.message.reply_text("⚠️ 추천 후보 없음 (24h 상승 코인 부재)")
         return
 
-    lines = ["📊 <b>업비트 단타 추천 (v3)</b>\n"]
+    header = "📊 <b>업비트 단타 추천 (v3)</b>" if filter_ok else "⚠️ <b>업비트 추천 (필터 미달 — 시장 조용)</b>"
+    lines = [header + "\n"]
     for i, r in enumerate(top3, 1):
         lines.append(
             f"{i}. {r['market']} | 1h: {r['change_1h']:+.1f}% | "
