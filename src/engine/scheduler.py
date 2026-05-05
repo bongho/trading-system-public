@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -127,13 +127,22 @@ class TradingScheduler:
             logger.error("Daily report failed: %s", e, exc_info=True)
 
     async def _run_crypto_sim(self) -> None:
-        """4h 주기 업비트 단타 시뮬레이션"""
+        """4h 주기 업비트 단타 시뮬레이션 (non-blocking)"""
         script = Path("/app/skills/crypto-recommender/scripts/simulate_upbit.py")
         if not script.exists():
             logger.warning("crypto sim script not found: %s", script)
             return
         try:
-            subprocess.run([sys.executable, str(script)], timeout=300, check=False)
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(script),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            if stderr:
+                logger.warning("crypto sim stderr: %s", stderr.decode()[:500])
+        except asyncio.TimeoutError:
+            logger.error("Crypto sim timed out after 300s")
         except Exception as e:
             logger.error("Crypto sim failed: %s", e)
 

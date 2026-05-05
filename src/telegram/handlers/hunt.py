@@ -8,9 +8,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -287,11 +287,13 @@ async def _upbit_recommend(
         await update.message.reply_text("❌ 추천 스크립트를 찾을 수 없습니다.")
         return
     try:
-        result = subprocess.run(
-            [sys.executable, str(script), "--exchange", "upbit", "--market", "spot"],
-            capture_output=True, text=True, timeout=120,
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, str(script), "--exchange", "upbit", "--market", "spot",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        data = json.loads(result.stdout)
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        data = json.loads(stdout.decode())
         top3 = data.get("top3", [])
     except Exception as e:
         logger.error("Upbit recommend failed: %s", e)
@@ -309,3 +311,4 @@ async def _upbit_recommend(
             f"15m: {r['change_15m']:+.1f}% | RSI: {r['rsi_14']} | 급등: {r['vol_ratio']:.1f}×"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
