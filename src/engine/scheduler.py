@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -48,6 +51,17 @@ class TradingScheduler:
                 id="daily_report",
             )
             logger.info("Daily report scheduled at 21:00 KST")
+
+        # 업비트 단타 시뮬레이션 (매 4h, 0/4/8/12/16/20시 KST)
+        self._scheduler.add_job(
+            self._run_crypto_sim,
+            "cron",
+            hour="*/4",
+            minute=0,
+            id="crypto_sim",
+            misfire_grace_time=300,
+        )
+        logger.info("Crypto simulation scheduled every 4h")
 
         self._scheduler.start()
         logger.info("Trading scheduler started with %d strategies", len(self._jobs))
@@ -111,6 +125,17 @@ class TradingScheduler:
             await self._daily_report_callback(strategies)
         except Exception as e:
             logger.error("Daily report failed: %s", e, exc_info=True)
+
+    async def _run_crypto_sim(self) -> None:
+        """4h 주기 업비트 단타 시뮬레이션"""
+        script = Path("/app/skills/crypto-recommender/scripts/simulate_upbit.py")
+        if not script.exists():
+            logger.warning("crypto sim script not found: %s", script)
+            return
+        try:
+            subprocess.run([sys.executable, str(script)], timeout=300, check=False)
+        except Exception as e:
+            logger.error("Crypto sim failed: %s", e)
 
     async def run_once(self, strategy_id: str) -> list:
         """수동으로 전략 1회 실행"""

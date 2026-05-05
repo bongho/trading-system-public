@@ -8,7 +8,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from telegram import Update
@@ -34,6 +38,7 @@ def register_hunt_handlers(bot: TradingBot) -> None:
         return wrapper
 
     bot.app.add_handler(CommandHandler("hunt", _make(_hunt_router)))
+    bot.app.add_handler(CommandHandler("upbit", _make(_upbit_recommend)))
 
 
 @authorized_only
@@ -270,3 +275,37 @@ def _usage() -> str:
 
 /hunt status  — 현재 상태
 /hunt stop    — 중지"""
+
+
+async def _upbit_recommend(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, bot: TradingBot
+) -> None:
+    """/upbit — 업비트 단타 추천 (v3, 즉시 조회)"""
+    await update.message.reply_text("🔍 업비트 단타 추천 조회 중...")
+    script = Path("/app/skills/crypto-recommender/scripts/recommend.py")
+    if not script.exists():
+        await update.message.reply_text("❌ 추천 스크립트를 찾을 수 없습니다.")
+        return
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script), "--exchange", "upbit", "--market", "spot"],
+            capture_output=True, text=True, timeout=120,
+        )
+        data = json.loads(result.stdout)
+        top3 = data.get("top3", [])
+    except Exception as e:
+        logger.error("Upbit recommend failed: %s", e)
+        await update.message.reply_text(f"⚠️ 조회 실패: {e}")
+        return
+
+    if not top3:
+        await update.message.reply_text("⚠️ 현재 조건을 충족하는 코인 없음 (RSI·거래량 필터 미달)")
+        return
+
+    lines = ["📊 <b>업비트 단타 추천 (v3)</b>\n"]
+    for i, r in enumerate(top3, 1):
+        lines.append(
+            f"{i}. {r['market']} | 1h: {r['change_1h']:+.1f}% | "
+            f"15m: {r['change_15m']:+.1f}% | RSI: {r['rsi_14']} | 급등: {r['vol_ratio']:.1f}×"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
