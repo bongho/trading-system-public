@@ -13,7 +13,11 @@ An automated trading system for Korean markets (KRX stocks via Kiwoom Securities
 - **AI agent**: OpenAI / Claude backend for signal review and market commentary
 - **Risk management**: Daily loss limit, per-position size cap
 - **Notifications**: Telegram bot (command & alert) + Discord daily report
-- **Backtesting**: Built-in engine per strategy
+- **Backtesting**: Built-in engine per strategy with Monte Carlo p-value + walk-forward validation
+- **Bull/Bear Debate**: Rule-based conflict filter — blocks signals when both bullish and bearish evidence simultaneously score ≥ 2/4
+- **Shadow Account Loop**: Extracts winning patterns from simulation JSONL logs and suggests RSI/vol_ratio parameter adjustments
+- **Signal Bus**: File-based IPC (`data/signals/pending.jsonl`) decoupling stdlib skills from the async engine layer
+- **Skill Bridge**: Async adapter routing skill signals through SwarmConsensus before execution
 - **Docker-first**: Single `docker compose up` to run
 
 ---
@@ -43,9 +47,18 @@ graph TB
         DB[(SQLite DB<br/>trades · market data · strategies)]
     end
 
+    subgraph Skills["Skill Layer (stdlib)"]
+        SK[crypto-recommender<br/>debate filter · shadow loop]
+        BUS[Signal Bus<br/>data/signals/pending.jsonl]
+        SB[Skill Bridge<br/>async adapter]
+    end
+
     TG <-->|commands & alerts| BOT
     BOT --> EXE
     SCH -->|trigger| STR
+    SK -->|emit| BUS
+    BUS -->|drain| SB
+    SB -->|TradeSignal| AGT
     STR -->|signals| EXE
     STR <-->|OHLCV| COL
     AGT <-->|analysis| AI
@@ -101,17 +114,34 @@ sequenceDiagram
 ### Directory layout
 
 ```
+core/                              # Stdlib-only, no circular deps
+├── debate.py                      # Bull/Bear conflict filter (rule-based 4+4)
+├── regime_classifier.py           # NASDAQ/BTC/funding → risk_on|neutral|risk_off
+├── shadow_loop.py                 # Extract winning patterns from simulation logs
+├── signal_bus.py                  # File-based IPC (pending.jsonl)
+└── signal_schema.py               # core.Signal dataclass
+
 src/
 ├── agents/          # AI agent (OpenAI / Claude backends, orchestrator, sandbox)
+│   └── swarm.py     # SwarmConsensus — 3-agent parallel vote (2/3 quorum)
 ├── brokers/         # BrokerAdapter implementations (Kiwoom, Upbit)
 ├── data/            # Market data collector with SQLite read-through cache
 ├── db/              # SQLite schema & repositories
 ├── engine/          # Executor, RiskManager, Scheduler, Backtest
+│   └── skill_bridge.py  # Async adapter: signal_bus → SwarmConsensus → Executor
 ├── reporters/       # Discord reporter, Telegram notifier
 ├── strategies/      # Strategy base class + 3 built-in strategies
 ├── telegram/        # Bot + command handlers
 └── utils/           # Technical indicators (RSI, BB, Squeeze, ...)
+
+skills/
+└── crypto-recommender/
+    └── scripts/
+        ├── recommend.py        # Signal scoring with debate filter
+        └── simulate_upbit.py   # 4h sim loop + signal_bus emit + shadow loop
 ```
+
+**Dependency rule**: `src/` may import `core/`; `skills/` may import `core/`. Neither `core/` nor `skills/` import from `src/` — no circular dependencies.
 
 ---
 
@@ -346,7 +376,8 @@ gantt
     section AI Layer
     Evaluator-Optimizer orchestrator     :done, 2025-03, 1M
     Swarm Consensus (3-agent voting)     :done, 2025-04, 1M
-    PSO parameter optimization           :active, pso, 2025-05, 2M
+    Bull/Bear Debate + Shadow Loop       :done, 2026-05, 1M
+    PSO parameter optimization           :active, pso, 2026-06, 2M
     Adaptive strategy allocation         :alloc, after pso, 2M
 ```
 
@@ -357,9 +388,10 @@ gantt
 | 3 | Discord daily report + Telegram bot | ✅ Done |
 | 4 | DoubleBB & SqueezeMTF strategies + Kiwoom REST API | ✅ Done |
 | 5 | AI Agent (Evaluator-Optimizer loop) | ✅ Done |
-| **6** | **Swarm Consensus — 3-agent signal voting** | ✅ **Done** |
-| 7 | PSO parameter auto-optimization (weekly) | 🔜 Planned |
-| 8 | Adaptive strategy capital allocation | 🔜 Planned |
+| 6 | Swarm Consensus — 3-agent signal voting | ✅ Done |
+| **7** | **Skill layer loose coupling** — debate filter, shadow loop, signal bus, skill bridge | ✅ **Done** |
+| 8 | PSO parameter auto-optimization (weekly) | 🔜 Planned |
+| 9 | Adaptive strategy capital allocation | 🔜 Planned |
 
 ---
 
