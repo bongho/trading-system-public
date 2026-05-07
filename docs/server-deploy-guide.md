@@ -1,6 +1,6 @@
 # Ubuntu 서버 배포 가이드
 
-> Private GitHub 저장소(`bongho/trading-system`) 기준
+> [`bongho/trading-system-public`](https://github.com/bongho/trading-system-public) 기준
 
 ---
 
@@ -8,13 +8,13 @@
 
 - Ubuntu 서버 (8GB RAM 이상)
 - Docker + Docker Compose 설치됨
-- GitHub Private 저장소 접근 권한
+- GitHub 저장소 접근 권한 (Public 레포는 SSH 인증 불필요, HTTPS clone 가능)
 
 ---
 
 ## 1단계: GitHub SSH 키 설정 (최초 1회)
 
-서버에서 Private 저장소를 clone하려면 SSH 인증이 필요합니다.
+서버에서 저장소를 clone하려면 SSH 인증이 필요합니다.
 
 ```bash
 # 서버에서 SSH 키 생성
@@ -42,7 +42,7 @@ chmod 600 ~/.ssh/config
 
 # 연결 테스트
 ssh -T git@github.com
-# 성공 시: "Hi bongho! You've successfully authenticated..."
+# 성공 시: "Hi <your-github-username>! You've successfully authenticated..."
 ```
 
 ---
@@ -52,7 +52,7 @@ ssh -T git@github.com
 ```bash
 # 홈 디렉토리에 클론
 cd ~
-git clone git@github.com:bongho/trading-system.git
+git clone https://github.com/bongho/trading-system-public.git trading-system
 cd trading-system
 ```
 
