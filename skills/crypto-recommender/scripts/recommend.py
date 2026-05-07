@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[3]))
 from core.regime_classifier import classify as classify_regime
+from core.debate import debate as debate_filter
 
 API_BINANCE_F = 'https://fapi.binance.com/fapi/v1/ticker/24hr'
 API_BINANCE_S = 'https://api.binance.com/api/v3/ticker/24hr'
@@ -102,20 +103,26 @@ def recommend_binance_futures(regime_params=None):
                        min_vol_ratio=rp.get('vol_ratio_min', 1.5))
         if s is None:
             continue
-        scored.append((s, d, ch_1h, ch_15m, rsi, vol_ratio))
+        dr = debate_filter(ch_1h, rsi, vol_ratio, ch_15m)
+        scored.append((s, d, ch_1h, ch_15m, rsi, vol_ratio, dr))
         time.sleep(0.08)
 
+    # prefer debate-passed signals; fall back to all if none passed
+    debate_ok = [x for x in scored if x[6].passed]
+    source = debate_ok if debate_ok else scored
     top = []
-    for s, d, ch_1h, ch_15m, rsi, vol_ratio in sorted(scored, key=lambda x: x[0], reverse=True)[:3]:
+    for s, d, ch_1h, ch_15m, rsi, vol_ratio, dr in sorted(source, key=lambda x: x[0], reverse=True)[:3]:
         top.append({
-            'symbol':      d['symbol'],
-            'score':       s,
-            'lastPrice':   d.get('lastPrice'),
-            'change_1h':   ch_1h,
-            'change_15m':  ch_15m,
-            'rsi_14':      rsi,
-            'vol_ratio':   vol_ratio,
-            'quoteVolume': d.get('quoteVolume'),
+            'symbol':        d['symbol'],
+            'score':         s,
+            'lastPrice':     d.get('lastPrice'),
+            'change_1h':     ch_1h,
+            'change_15m':    ch_15m,
+            'rsi_14':        rsi,
+            'vol_ratio':     vol_ratio,
+            'quoteVolume':   d.get('quoteVolume'),
+            'debate_passed': dr.passed,
+            'debate_verdict': dr.verdict,
         })
     return top
 
@@ -142,19 +149,24 @@ def recommend_binance_spot(regime_params=None):
                        min_vol_ratio=rp.get('vol_ratio_min', 1.5))
         if s is None:
             continue
-        scored.append((s, d, ch_1h, ch_15m, rsi, vol_ratio))
+        dr = debate_filter(ch_1h, rsi, vol_ratio, ch_15m)
+        scored.append((s, d, ch_1h, ch_15m, rsi, vol_ratio, dr))
         time.sleep(0.08)
 
+    debate_ok = [x for x in scored if x[6].passed]
+    source = debate_ok if debate_ok else scored
     top = []
-    for s, d, ch_1h, ch_15m, rsi, vol_ratio in sorted(scored, key=lambda x: x[0], reverse=True)[:3]:
+    for s, d, ch_1h, ch_15m, rsi, vol_ratio, dr in sorted(source, key=lambda x: x[0], reverse=True)[:3]:
         top.append({
-            'symbol':     d['symbol'],
-            'score':      s,
-            'change_1h':  ch_1h,
-            'change_15m': ch_15m,
-            'rsi_14':     rsi,
-            'vol_ratio':  vol_ratio,
-            'volume':     d.get('volume'),
+            'symbol':         d['symbol'],
+            'score':          s,
+            'change_1h':      ch_1h,
+            'change_15m':     ch_15m,
+            'rsi_14':         rsi,
+            'vol_ratio':      vol_ratio,
+            'volume':         d.get('volume'),
+            'debate_passed':  dr.passed,
+            'debate_verdict': dr.verdict,
         })
     return top
 
@@ -201,27 +213,33 @@ def recommend_upbit_spot(regime_params=None):
                      rsi_hi=min(70, rp.get('rsi_hi', 70)),
                      min_vol_ratio=rp.get('vol_ratio_min', 1.2),
                      min_bullish=0.50)
-        row = (ch_1h, ch_15m, rsi, vol_ratio, t, usdt_vol)
+        dr = debate_filter(ch_1h, rsi, vol_ratio, ch_15m)
         if s is not None:
-            scored.append((s, t, ch_1h, ch_15m, rsi, vol_ratio))
+            scored.append((s, t, ch_1h, ch_15m, rsi, vol_ratio, dr))
         else:
             # 폴백: 필터 미달이지만 모멘텀 상위 후보 보관
-            fallback.append((ch_1h * 0.45 + ch_15m * 0.20, t, ch_1h, ch_15m, rsi, vol_ratio))
+            fallback.append((ch_1h * 0.45 + ch_15m * 0.20, t, ch_1h, ch_15m, rsi, vol_ratio, dr))
         time.sleep(0.15)
 
-    source = scored if scored else fallback
     filter_passed = bool(scored)
+    source = scored if scored else fallback
+    # prefer debate-passed signals within chosen pool
+    debate_ok = [x for x in source if x[6].passed]
+    if debate_ok:
+        source = debate_ok
     top = []
-    for s, t, ch_1h, ch_15m, rsi, vol_ratio in sorted(source, key=lambda x: x[0], reverse=True)[:3]:
+    for s, t, ch_1h, ch_15m, rsi, vol_ratio, dr in sorted(source, key=lambda x: x[0], reverse=True)[:3]:
         top.append({
-            'market':         t['market'],
-            'score':          round(s, 3),
-            'change_1h':      ch_1h,
-            'change_15m':     ch_15m,
-            'rsi_14':         rsi,
-            'vol_ratio':      vol_ratio,
-            'acc_volume_24h': t.get('acc_trade_volume_24h'),
-            'filter_passed':  filter_passed,
+            'market':          t['market'],
+            'score':           round(s, 3),
+            'change_1h':       ch_1h,
+            'change_15m':      ch_15m,
+            'rsi_14':          rsi,
+            'vol_ratio':       vol_ratio,
+            'acc_volume_24h':  t.get('acc_trade_volume_24h'),
+            'filter_passed':   filter_passed,
+            'debate_passed':   dr.passed,
+            'debate_verdict':  dr.verdict,
         })
     return top
 

@@ -10,10 +10,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[3]))
 from core.reporter import send_telegram, update_obsidian_note
+from core import signal_bus
+from core.shadow_loop import analyze as shadow_analyze
 
 LOG_DIR   = Path(os.environ.get('LOG_DIR',
                  str(Path(__file__).parent.parent / 'logs')))
 RECOMMEND = Path(__file__).parent / 'recommend.py'
+
+# Run shadow_loop analysis every N simulation rounds
+_SHADOW_INTERVAL = int(os.environ.get('SHADOW_INTERVAL', '10'))
 
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
@@ -187,8 +192,50 @@ def main():
     append_log(entry, today)
     print(f'[INFO] 로그 기록: {log_path(today)}')
 
+    # 4b. Signal Bus — emit each rec so skill_bridge can pick them up
+    for r in recs:
+        signal_bus.emit({
+            'symbol':    r['market'],
+            'exchange':  'upbit',
+            'timeframe': '4h',
+            'score':     r.get('score', 50),
+            'direction': 'long',
+            'entry':     r.get('entry_price'),
+            'regime':    'neutral',
+            'source':    'upbit_sim_v3',
+            'meta': {
+                'rsi':        r.get('rsi_14'),
+                'vol_ratio':  r.get('vol_ratio'),
+                'change_1h':  r.get('change_1h'),
+                'change_15m': r.get('change_15m'),
+            },
+        })
+    print(f'[INFO] Signal Bus: {len(recs)}건 emit')
+
+    # 4c. Shadow Loop — run every _SHADOW_INTERVAL rounds
+    total_rounds = sum(
+        1 for f in LOG_DIR.glob('upbit_sim_*.jsonl')
+        for _ in open(f)
+        if _.strip()
+    )
+    shadow_msg = ''
+    if total_rounds > 0 and total_rounds % _SHADOW_INTERVAL == 0:
+        analysis = shadow_analyze(LOG_DIR)
+        print(f'[INFO] Shadow Loop: {analysis.summary_text()}')
+        if analysis.status == 'analyzed' and analysis.suggested_params:
+            prev = analysis.current_params
+            sugg = analysis.suggested_params
+            if any(sugg.get(k) != prev.get(k) for k in sugg):
+                shadow_msg = (
+                    f'\n\n🔬 <b>Shadow Loop 분석</b> ({analysis.total_trades}건)\n'
+                    f'승률 {analysis.win_rate:.1f}% | '
+                    f'제안 rsi_lo={sugg.get("rsi_lo", "—")} '
+                    f'rsi_hi={sugg.get("rsi_hi", "—")} '
+                    f'vol_min={sugg.get("vol_ratio_min", "—")}'
+                )
+
     # 5. Telegram
-    msg = build_message(ts_kst, recs, pnl)
+    msg = build_message(ts_kst, recs, pnl) + shadow_msg
     print('\n--- Telegram 메시지 미리보기 ---')
     print(msg)
     print('---')
