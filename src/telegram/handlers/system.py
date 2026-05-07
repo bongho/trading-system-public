@@ -83,6 +83,11 @@ async def _help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /ai confirm <id> - 제안 적용
 /ai cancel <id> - 제안 취소
 
+📐 Holy Grail (Street Smarts ADX)
+/hg - 현재 포지션 + 누적 성과
+/hg_scan - 즉시 스캔 실행
+/hg_bt - 백테스트 결과 요약
+
 🔧 시스템
 /dryrun on|off - 모의/실매매 모드 전환
 /health - 시스템 상태 (uptime, DB, 연결)

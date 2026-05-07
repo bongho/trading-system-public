@@ -45,5 +45,10 @@ class Settings(BaseSettings):
     swarm_quorum: int = Field(default=2, description="합의에 필요한 최소 approve 수 (최대 3)")
     swarm_min_confidence: float = Field(default=0.4, description="합의를 실행할 최소 신호 confidence")
 
+    # Skill schedules (Phase 7)
+    crypto_sim_enabled: bool = Field(default=True, description="업비트 단타 시뮬레이션 4h 스케줄 활성화")
+    hg_sim_enabled: bool = Field(default=True, description="Holy Grail 일별 시뮬레이션 활성화")
+    hg_sim_until: str = Field(default="", description="Holy Grail 시뮬 종료일 YYYY-MM-DD (빈 값=무제한)")
+
 
 settings = Settings()

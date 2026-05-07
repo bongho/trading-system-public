@@ -8,6 +8,7 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from src.config import settings
 from src.engine.executor import Executor
 from src.strategies.registry import StrategyRegistry
 
@@ -53,15 +54,30 @@ class TradingScheduler:
             logger.info("Daily report scheduled at 21:00 KST")
 
         # 업비트 단타 시뮬레이션 (매 4h, 0/4/8/12/16/20시 KST)
-        self._scheduler.add_job(
-            self._run_crypto_sim,
-            "cron",
-            hour="*/4",
-            minute=0,
-            id="crypto_sim",
-            misfire_grace_time=300,
-        )
-        logger.info("Crypto simulation scheduled every 4h")
+        if settings.crypto_sim_enabled:
+            self._scheduler.add_job(
+                self._run_crypto_sim,
+                "cron",
+                hour="*/4",
+                minute=0,
+                id="crypto_sim",
+                misfire_grace_time=300,
+            )
+            logger.info("Crypto simulation scheduled every 4h")
+        else:
+            logger.info("Crypto simulation DISABLED (CRYPTO_SIM_ENABLED=false)")
+
+        # Holy Grail 시뮬레이션 (매일 22:30 KST — 미국 장마감 후)
+        if settings.hg_sim_enabled:
+            self._scheduler.add_job(
+                self._run_hg_sim,
+                "cron",
+                hour=22,
+                minute=30,
+                id="hg_sim",
+                misfire_grace_time=600,
+            )
+            logger.info("Holy Grail simulation scheduled at 22:30 KST")
 
         self._scheduler.start()
         logger.info("Trading scheduler started with %d strategies", len(self._jobs))
@@ -145,6 +161,37 @@ class TradingScheduler:
             logger.error("Crypto sim timed out after 300s")
         except Exception as e:
             logger.error("Crypto sim failed: %s", e)
+
+    async def _run_hg_sim(self) -> None:
+        """Holy Grail 일별 시뮬레이션 (non-blocking)"""
+        import datetime
+        # until 날짜 초과 시 중단
+        if settings.hg_sim_until:
+            try:
+                until = datetime.date.fromisoformat(settings.hg_sim_until)
+                if datetime.date.today() > until:
+                    logger.info("Holy Grail sim: past until date %s, skipping", until)
+                    return
+            except ValueError:
+                pass
+
+        script = Path("/app/skills/holy-grail/scripts/simulate.py")
+        if not script.exists():
+            logger.warning("HG sim script not found: %s", script)
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(script),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            if stderr:
+                logger.warning("HG sim stderr: %s", stderr.decode()[:500])
+        except asyncio.TimeoutError:
+            logger.error("Holy Grail sim timed out after 300s")
+        except Exception as e:
+            logger.error("Holy Grail sim failed: %s", e)
 
     async def run_once(self, strategy_id: str) -> list:
         """수동으로 전략 1회 실행"""
