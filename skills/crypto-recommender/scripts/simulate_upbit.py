@@ -5,13 +5,14 @@ Upbit 단타 v3 라이브 시뮬레이션 (4h 주기)
 - Telegram Bot API 알림 (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID 환경변수)
 - Obsidian 노트 "라이브 시뮬레이션" 섹션 업데이트
 """
-import json, os, sys, time, datetime, urllib.request, urllib.parse
+import json, os, sys, datetime, urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[3]))
+from core.reporter import send_telegram, update_obsidian_note
 
 LOG_DIR   = Path(os.environ.get('LOG_DIR',
                  str(Path(__file__).parent.parent / 'logs')))
-_note_env = os.environ.get('OBSIDIAN_NOTE_PATH', '')
-NOTE_PATH = Path(_note_env) if _note_env else None
 RECOMMEND = Path(__file__).parent / 'recommend.py'
 
 KST = datetime.timezone(datetime.timedelta(hours=9))
@@ -90,27 +91,7 @@ def calc_pnl(prev_recs: list[dict]) -> dict[str, float]:
     return pnl
 
 
-# ── Telegram ──────────────────────────────────────────────────────────────────
-
-def send_telegram(text: str):
-    token   = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID', '')
-    if not token or not chat_id:
-        print('[INFO] Telegram env vars not set — skipping notification')
-        return
-    url  = f'https://api.telegram.org/bot{token}/sendMessage'
-    body = json.dumps({'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}).encode()
-    req  = urllib.request.Request(url, data=body,
-                                  headers={'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            resp = json.load(r)
-        if resp.get('ok'):
-            print('[INFO] Telegram message sent')
-        else:
-            print(f'[WARN] Telegram error: {resp}', file=sys.stderr)
-    except Exception as e:
-        print(f'[WARN] Telegram send failed: {e}', file=sys.stderr)
+# send_telegram is imported from core.reporter
 
 
 def build_message(ts_kst: str, recs: list[dict], pnl: dict[str, float]) -> str:
@@ -146,49 +127,27 @@ def build_message(ts_kst: str, recs: list[dict], pnl: dict[str, float]) -> str:
 
 # ── Obsidian note update ──────────────────────────────────────────────────────
 
-def update_obsidian_note(ts_kst: str, recs: list[dict], pnl: dict[str, float]):
-    if NOTE_PATH is None:
-        return
-    if not NOTE_PATH.exists():
-        print(f'[WARN] Note not found: {NOTE_PATH}')
-        return
-
-    content = NOTE_PATH.read_text(encoding='utf-8')
-    section_header = '## 📡 라이브 시뮬레이션'
-
-    # build new row
+def _update_obsidian(ts_kst: str, recs: list[dict], pnl: dict[str, float]):
     date_str = ts_kst[:10]
     time_str = ts_kst[11:16]
-    rec_str = ', '.join(r['market'].replace('KRW-', '') for r in recs) if recs else '-'
+    rec_str  = ', '.join(r['market'].replace('KRW-', '') for r in recs) if recs else '-'
 
-    avg_pnl = ''
-    win_str = ''
+    avg_pnl = win_str = ''
     if pnl:
-        avg = sum(pnl.values()) / len(pnl)
-        wins = sum(1 for v in pnl.values() if v > 0)
+        avg     = sum(pnl.values()) / len(pnl)
+        wins    = sum(1 for v in pnl.values() if v > 0)
         avg_pnl = f'{avg:+.2f}%'
         win_str = f'{wins}/{len(pnl)}'
 
-    new_row = f'| {date_str} {time_str} | {rec_str} | {avg_pnl} | {win_str} |'
+    new_row      = f'| {date_str} {time_str} | {rec_str} | {avg_pnl} | {win_str} |'
+    table_header = '| 시각 | 추천 코인 | 4h 평균 수익 | 승률 |\n|------|-----------|-------------|------|'
 
-    if section_header not in content:
-        table_header = (
-            f'\n\n{section_header}\n\n'
-            '| 시각 | 추천 코인 | 4h 평균 수익 | 승률 |\n'
-            '|------|-----------|-------------|------|\n'
-        )
-        content = content.rstrip() + table_header + new_row + '\n'
-    else:
-        # append after last table row
-        idx = content.rfind('| ')
-        if idx != -1:
-            end = content.find('\n', idx)
-            content = content[:end + 1] + new_row + '\n' + content[end + 1:]
-        else:
-            content += new_row + '\n'
-
-    NOTE_PATH.write_text(content, encoding='utf-8')
-    print(f'[INFO] Obsidian note updated: {new_row}')
+    update_obsidian_note(
+        note_path=None,           # reads OBSIDIAN_NOTE_PATH env var
+        section_header='## 📡 라이브 시뮬레이션',
+        table_header=table_header,
+        new_row=new_row,
+    )
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -236,7 +195,7 @@ def main():
     send_telegram(msg)
 
     # 6. Obsidian note
-    update_obsidian_note(ts_kst, recs, pnl)
+    _update_obsidian(ts_kst, recs, pnl)
 
     print(f'[{datetime.datetime.now(KST).isoformat(timespec="seconds")}] 완료')
 

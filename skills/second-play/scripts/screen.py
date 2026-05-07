@@ -10,8 +10,16 @@
 # Data: Yahoo Finance chart API (stdlib only, no auth)
 
 from __future__ import annotations
-import argparse, json, time, urllib.request
+import argparse, json, sys, time, urllib.request
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).parents[3]))
+try:
+    from core.enrichment import earnings_surprise_multiplier as _earnings_mult
+except ImportError:
+    def _earnings_mult(symbol: str) -> float:  # graceful fallback
+        return 1.0
 
 # ---------------------------------------------------------------------------
 # 2차 병목 세부 유니버스
@@ -281,13 +289,26 @@ def to_signal(score: float, horizon: str = "short") -> str:
     return "BUY" if score >= 2.0 else ("WATCH" if score >= 0 else "EXIT")
 
 
-def fetch_and_score(symbols: list[str], risk: str, top_n: int, horizon: str = "short") -> tuple[list[dict], list[dict]]:
-    """종목 리스트 조회·점수화·정렬 후 (top_n, all) 반환."""
+def fetch_and_score(
+    symbols: list[str],
+    risk: str,
+    top_n: int,
+    horizon: str = "short",
+    enrich: bool = False,
+) -> tuple[list[dict], list[dict]]:
+    """종목 리스트 조회·점수화·정렬 후 (top_n, all) 반환.
+
+    enrich=True 시 Yahoo Finance 실적 서프라이즈 배수를 score에 반영.
+    """
     ranked = []
     for sym in symbols:
         data = get_chart_long(sym) if horizon == "long" else get_chart(sym)
         if "error" not in data:
             s = score_stock_long(data, risk) if horizon == "long" else score_stock(data, risk)
+            if enrich:
+                mult = _earnings_mult(sym)
+                s    = round(s * mult, 3)
+                data['earnings_multiplier'] = mult
             ranked.append({**data, "score": s, "signal": to_signal(s, horizon), "horizon": horizon})
         time.sleep(0.08)
     ranked.sort(key=lambda x: x["score"], reverse=True)
@@ -304,13 +325,13 @@ def bottleneck_strength(top: list[dict], top_n: int) -> str:
 # Command: screen — 표준 4대 카테고리 스크리닝
 # ---------------------------------------------------------------------------
 
-def cmd_screen(category: str, top_n: int, horizon: str = "short") -> None:
+def cmd_screen(category: str, top_n: int, horizon: str = "short", enrich: bool = False) -> None:
     cats = LEGACY_CATEGORIES if category == "all" else {category: LEGACY_CATEGORIES[category]}
     results: dict[str, Any] = {}
     total_buy, total_top = 0, 0
 
     for key, cfg in cats.items():
-        top, all_stocks = fetch_and_score(cfg["stocks"], cfg["risk"], top_n, horizon)
+        top, all_stocks = fetch_and_score(cfg["stocks"], cfg["risk"], top_n, horizon, enrich=enrich)
         results[key] = {"label": cfg["label"], "risk": cfg["risk"], "top": top, "all": all_stocks}
         total_buy += sum(1 for s in top if s["signal"] == "BUY")
         total_top += len(top)
@@ -382,7 +403,7 @@ def cmd_trends(top_n: int, horizon: str = "short") -> None:
 # Command: discover — 트렌드 키워드 → Aschenbrenner 렌즈로 종목 선정
 # ---------------------------------------------------------------------------
 
-def cmd_discover(trend: str, top_n: int, horizon: str = "short") -> None:
+def cmd_discover(trend: str, top_n: int, horizon: str = "short", enrich: bool = False) -> None:
     trend_lower = trend.lower().strip()
 
     # 키워드 매핑 (부분 매치 포함)
@@ -413,7 +434,7 @@ def cmd_discover(trend: str, top_n: int, horizon: str = "short") -> None:
 
     for theme_key in matched_themes:
         cfg = BOTTLENECK_UNIVERSE[theme_key]
-        top, all_stocks = fetch_and_score(cfg["stocks"], cfg["risk"], top_n, horizon)
+        top, all_stocks = fetch_and_score(cfg["stocks"], cfg["risk"], top_n, horizon, enrich=enrich)
         results[theme_key] = {
             "label": cfg["label"],
             "angle": cfg["angle"],
@@ -473,15 +494,21 @@ def main() -> None:
     p_discover.add_argument("--trend", required=True, help="예: nuclear, copper, cooling, optical")
     p_discover.add_argument("--top", type=int, default=3, help="테마별 추천 수 (기본: 3)")
     p_discover.add_argument("--horizon", default="short", choices=["short", "long"], help=HORIZON_HELP)
+    p_discover.add_argument("--enrich", action="store_true",
+                            help="Yahoo Finance 실적 서프라이즈 배수를 score에 반영")
+
+    # screen --enrich 플래그
+    p_screen.add_argument("--enrich", action="store_true",
+                          help="Yahoo Finance 실적 서프라이즈 배수를 score에 반영")
 
     args = p.parse_args()
 
     if args.cmd == "screen":
-        cmd_screen(args.category, args.top, args.horizon)
+        cmd_screen(args.category, args.top, args.horizon, enrich=getattr(args, 'enrich', False))
     elif args.cmd == "trends":
         cmd_trends(args.top, args.horizon)
     elif args.cmd == "discover":
-        cmd_discover(args.trend, args.top, args.horizon)
+        cmd_discover(args.trend, args.top, args.horizon, enrich=getattr(args, 'enrich', False))
 
 
 if __name__ == "__main__":

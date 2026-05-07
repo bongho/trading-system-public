@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-import argparse, json, time, urllib.request
+import argparse, json, sys, time, urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[3]))
+from core.regime_classifier import classify as classify_regime
 
 API_BINANCE_F = 'https://fapi.binance.com/fapi/v1/ticker/24hr'
 API_BINANCE_S = 'https://api.binance.com/api/v3/ticker/24hr'
@@ -75,7 +79,8 @@ def score_v3(ch_1h, ch_15m, vol_usdt, rsi, vol_ratio, bullish,
 
     return round(momentum + surge_bonus + liquidity + rsi_room, 3)
 
-def recommend_binance_futures():
+def recommend_binance_futures(regime_params=None):
+    rp   = regime_params or {}
     data = fetch_json(API_BINANCE_F)
     candidates = [
         d for d in data
@@ -91,7 +96,10 @@ def recommend_binance_futures():
         except Exception:
             continue
         vol = float(d.get('quoteVolume') or 0)
-        s   = score_v3(ch_1h, ch_15m, vol, rsi, vol_ratio, bullish)
+        s   = score_v3(ch_1h, ch_15m, vol, rsi, vol_ratio, bullish,
+                       rsi_lo=rp.get('rsi_lo', 45),
+                       rsi_hi=rp.get('rsi_hi', 68),
+                       min_vol_ratio=rp.get('vol_ratio_min', 1.5))
         if s is None:
             continue
         scored.append((s, d, ch_1h, ch_15m, rsi, vol_ratio))
@@ -111,7 +119,8 @@ def recommend_binance_futures():
         })
     return top
 
-def recommend_binance_spot():
+def recommend_binance_spot(regime_params=None):
+    rp   = regime_params or {}
     data = fetch_json(API_BINANCE_S)
     candidates = [
         d for d in data
@@ -127,7 +136,10 @@ def recommend_binance_spot():
         except Exception:
             continue
         vol = float(d.get('quoteVolume') or 0)
-        s   = score_v3(ch_1h, ch_15m, vol, rsi, vol_ratio, bullish)
+        s   = score_v3(ch_1h, ch_15m, vol, rsi, vol_ratio, bullish,
+                       rsi_lo=rp.get('rsi_lo', 45),
+                       rsi_hi=rp.get('rsi_hi', 68),
+                       min_vol_ratio=rp.get('vol_ratio_min', 1.5))
         if s is None:
             continue
         scored.append((s, d, ch_1h, ch_15m, rsi, vol_ratio))
@@ -146,7 +158,7 @@ def recommend_binance_spot():
         })
     return top
 
-def recommend_upbit_spot():
+def recommend_upbit_spot(regime_params=None):
     markets = fetch_json('https://api.upbit.com/v1/market/all')
     krw     = [m['market'] for m in markets if m['market'].startswith('KRW-')]
     tickers = []
@@ -183,8 +195,12 @@ def recommend_upbit_spot():
             continue
         krw_vol  = float(t.get('acc_trade_price_24h') or 0)
         usdt_vol = krw_vol / 1380
+        rp = regime_params or {}
         s = score_v3(ch_1h, ch_15m, usdt_vol, rsi, vol_ratio, bullish,
-                     rsi_lo=42, rsi_hi=70, min_vol_ratio=1.2, min_bullish=0.50)
+                     rsi_lo=max(42, rp.get('rsi_lo', 42)),
+                     rsi_hi=min(70, rp.get('rsi_hi', 70)),
+                     min_vol_ratio=rp.get('vol_ratio_min', 1.2),
+                     min_bullish=0.50)
         row = (ch_1h, ch_15m, rsi, vol_ratio, t, usdt_vol)
         if s is not None:
             scored.append((s, t, ch_1h, ch_15m, rsi, vol_ratio))
@@ -214,13 +230,22 @@ if __name__ == '__main__':
     p.add_argument('--exchange', required=True)
     p.add_argument('--market',   required=True, choices=['futures', 'spot'])
     args = p.parse_args()
-    out  = {'exchange': args.exchange, 'market': args.market, 'top3': []}
+
+    regime, regime_params = classify_regime()
+
+    out = {
+        'exchange':      args.exchange,
+        'market':        args.market,
+        'regime':        regime,
+        'regime_params': regime_params,
+        'top3':          [],
+    }
     if args.exchange.lower() == 'binance' and args.market == 'futures':
-        out['top3'] = recommend_binance_futures()
+        out['top3'] = recommend_binance_futures(regime_params)
     elif args.exchange.lower() == 'binance' and args.market == 'spot':
-        out['top3'] = recommend_binance_spot()
+        out['top3'] = recommend_binance_spot(regime_params)
     elif args.exchange.lower() == 'upbit' and args.market == 'spot':
-        out['top3'] = recommend_upbit_spot()
+        out['top3'] = recommend_upbit_spot(regime_params)
     else:
         out['error'] = 'Unsupported exchange/market combo'
     print(json.dumps(out, indent=2, ensure_ascii=False))
