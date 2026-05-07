@@ -88,6 +88,15 @@ async def _help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /hg_scan - 즉시 스캔 실행
 /hg_bt - 백테스트 결과 요약
 
+🏗 전략 빌더
+/build <설명> - LLM으로 전략 자동 생성
+/confirm - 생성된 전략 저장
+/reject - 생성된 전략 폐기
+/bt <name> [period] [symbols] - 범용 백테스트
+/sim <name> start|stop|status|run - 시뮬레이션 관리
+/sims - 전체 시뮬레이션 목록
+/skills - 사용 가능한 스킬 목록
+
 🔧 시스템
 /dryrun on|off - 모의/실매매 모드 전환
 /health - 시스템 상태 (uptime, DB, 연결)

@@ -79,6 +79,17 @@ class TradingScheduler:
             )
             logger.info("Holy Grail simulation scheduled at 22:30 KST")
 
+        # 커스텀 전략 레지스트리 시뮬레이션 (매일 22:35 KST)
+        self._scheduler.add_job(
+            self._run_registry_sims,
+            "cron",
+            hour=22,
+            minute=35,
+            id="registry_sims",
+            misfire_grace_time=600,
+        )
+        logger.info("Registry simulations scheduled at 22:35 KST")
+
         self._scheduler.start()
         logger.info("Trading scheduler started with %d strategies", len(self._jobs))
 
@@ -192,6 +203,72 @@ class TradingScheduler:
             logger.error("Holy Grail sim timed out after 300s")
         except Exception as e:
             logger.error("Holy Grail sim failed: %s", e)
+
+    async def _run_registry_sims(self) -> None:
+        """레지스트리에 등록된 커스텀 전략 시뮬레이션 일괄 실행."""
+        import datetime
+        import importlib.util
+        import json
+        from pathlib import Path as _Path
+
+        sim_base = _Path(
+            __import__("os").environ.get("SIM_BASE_DIR", "/app/data/simulations")
+        )
+        registry_file = sim_base / "_registry.json"
+        if not registry_file.exists():
+            return
+
+        try:
+            registry: dict = json.loads(registry_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.error("Registry load failed: %s", e)
+            return
+
+        if str(_Path("/app")) not in sys.path:
+            sys.path.insert(0, "/app")
+
+        today = datetime.date.today().isoformat()
+
+        for skill_name, info in registry.items():
+            if not info.get("enabled", False):
+                continue
+            until = info.get("until", "")
+            if until:
+                try:
+                    if datetime.date.fromisoformat(today) > datetime.date.fromisoformat(until):
+                        logger.info("Sim %s: past until_date %s, skipping", skill_name, until)
+                        continue
+                except ValueError:
+                    pass
+
+            custom_path = _Path(f"/app/skills/custom/{skill_name}/strategy.py")
+            if not custom_path.exists():
+                logger.warning("Sim %s: strategy.py not found", skill_name)
+                continue
+
+            try:
+                spec = importlib.util.spec_from_file_location("_strat", custom_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+
+                detect_fn = getattr(mod, "detect_signal", None)
+                if not callable(detect_fn):
+                    logger.warning("Sim %s: no detect_signal", skill_name)
+                    continue
+
+                meta: dict = getattr(mod, "METADATA", {})
+                from core.sim_runner import run_daily
+                run_daily(
+                    skill_name,
+                    detect_fn,
+                    meta.get("symbols", ["QQQ", "SPY"]),
+                    max_hold=meta.get("hold_days", 10),
+                    warmup=meta.get("warmup_bars", 60),
+                    until_date=until,
+                )
+                logger.info("Registry sim done: %s", skill_name)
+            except Exception as e:
+                logger.error("Registry sim %s failed: %s", skill_name, e, exc_info=True)
 
     async def run_once(self, strategy_id: str) -> list:
         """수동으로 전략 1회 실행"""
