@@ -220,6 +220,7 @@ async def main() -> None:
         daily_report_callback=(
             discord_reporter.send_daily_report if discord_reporter else None
         ),
+        notify_callback=bot.send_message,
     )
     bot.scheduler = scheduler
 

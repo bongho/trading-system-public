@@ -21,10 +21,12 @@ class TradingScheduler:
         registry: StrategyRegistry,
         executor: Executor,
         daily_report_callback: Any | None = None,
+        notify_callback: Any | None = None,
     ) -> None:
         self._registry = registry
         self._executor = executor
         self._daily_report_callback = daily_report_callback
+        self._notify_callback = notify_callback
         self._scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
         self._jobs: dict[str, str] = {}  # strategy_id -> job_id
 
@@ -196,9 +198,13 @@ class TradingScheduler:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
             if stderr:
                 logger.warning("HG sim stderr: %s", stderr.decode()[:500])
+            if stdout and self._notify_callback:
+                text = stdout.decode("utf-8", errors="replace").strip()
+                if text:
+                    await self._notify_callback(text)
         except asyncio.TimeoutError:
             logger.error("Holy Grail sim timed out after 300s")
         except Exception as e:
@@ -257,8 +263,8 @@ class TradingScheduler:
                     continue
 
                 meta: dict = getattr(mod, "METADATA", {})
-                from core.sim_runner import run_daily
-                run_daily(
+                from core.sim_runner import format_telegram, run_daily
+                result = run_daily(
                     skill_name,
                     detect_fn,
                     meta.get("symbols", ["QQQ", "SPY"]),
@@ -267,6 +273,8 @@ class TradingScheduler:
                     until_date=until,
                 )
                 logger.info("Registry sim done: %s", skill_name)
+                if self._notify_callback:
+                    await self._notify_callback(format_telegram(result))
             except Exception as e:
                 logger.error("Registry sim %s failed: %s", skill_name, e, exc_info=True)
 
