@@ -14,8 +14,10 @@ RUN pip install --no-cache-dir .
 
 # 소스 복사
 COPY src/ src/
+COPY core/ core/
+COPY skills/ skills/
 
 # 데이터 디렉토리
-RUN mkdir -p data/logs data/backups sandbox/strategies sandbox/results
+RUN mkdir -p data/logs data/backups sandbox/strategies sandbox/results data/simulations
 
 CMD ["python", "-m", "src.main"]
