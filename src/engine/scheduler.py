@@ -198,13 +198,9 @@ class TradingScheduler:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
             if stderr:
                 logger.warning("HG sim stderr: %s", stderr.decode()[:500])
-            if stdout and self._notify_callback:
-                text = stdout.decode("utf-8", errors="replace").strip()
-                if text:
-                    await self._notify_callback(text)
         except asyncio.TimeoutError:
             logger.error("Holy Grail sim timed out after 300s")
         except Exception as e:
