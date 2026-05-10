@@ -172,6 +172,24 @@ class Executor:
                 },
             }
 
+        # SELL: 시스템이 매수한 수량만 매도 (수동 보유분 보호)
+        if signal.side == "sell":
+            net_qty = await self._trade_repo.get_net_position(
+                signal.symbol, strategy.id
+            )
+            if net_qty <= 0:
+                logger.warning(
+                    "SELL 차단 [%s %s]: 시스템 보유 수량 없음 (DB net=%.6f)",
+                    strategy.id, signal.symbol, net_qty,
+                )
+                return None
+            if signal.amount > net_qty:
+                logger.info(
+                    "SELL 수량 조정 [%s %s]: %.6f → %.6f (DB net)",
+                    strategy.id, signal.symbol, signal.amount, net_qty,
+                )
+                signal = signal.model_copy(update={"amount": net_qty})
+
         # 주문 실행
         if signal.side == "buy":
             trade_result = await broker.buy(signal.symbol, signal.amount)

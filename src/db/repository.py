@@ -82,6 +82,19 @@ class TradeRepository:
         rows = await cursor.fetchall()
         return [dict(zip(columns, row)) for row in rows]
 
+    async def get_net_position(self, symbol: str, strategy_id: str) -> float:
+        """DB 매매이력 기반 시스템 순 보유 수량. BUY합 - SELL합."""
+        cursor = await self._db.execute(
+            """SELECT
+                 COALESCE(SUM(CASE WHEN side='buy'  THEN amount ELSE 0 END), 0)
+               - COALESCE(SUM(CASE WHEN side='sell' THEN amount ELSE 0 END), 0)
+               FROM trades
+               WHERE symbol = ? AND strategy_id = ?""",
+            (symbol, strategy_id),
+        )
+        row = await cursor.fetchone()
+        return float(row[0]) if row else 0.0
+
     async def get_strategy_stats(self, strategy_id: str) -> dict[str, Any]:
         cursor = await self._db.execute(
             """SELECT
