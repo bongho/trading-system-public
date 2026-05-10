@@ -69,10 +69,35 @@ class TradingBot:
         register_builder_handlers(self)
         logger.info("Telegram handlers registered")
 
+    async def _register_commands(self) -> None:
+        from telegram import BotCommand
+        commands = [
+            BotCommand("help",      "전체 명령어 목록"),
+            BotCommand("status",    "전략 상태 + 잔고"),
+            BotCommand("portfolio", "포트폴리오 조회"),
+            BotCommand("hg",        "Holy Grail 포지션"),
+            BotCommand("hg_scan",   "Holy Grail 즉시 스캔"),
+            BotCommand("hg_bt",     "Holy Grail 백테스트"),
+            BotCommand("dryrun",    "모의/실매매 전환"),
+            BotCommand("skills",    "사용 가능한 전략 목록"),
+            BotCommand("build",     "LLM으로 전략 생성"),
+            BotCommand("bt",        "백테스트 실행"),
+            BotCommand("sim",       "시뮬레이션 관리"),
+            BotCommand("sims",      "시뮬레이션 목록"),
+            BotCommand("stop",      "전략 긴급 정지"),
+            BotCommand("history",   "최근 매매 이력"),
+            BotCommand("signals",   "마지막 전략 시그널"),
+            BotCommand("pnl",       "기간별 손익"),
+            BotCommand("logs",      "최근 로그"),
+        ]
+        await self.app.bot.set_my_commands(commands)
+        logger.info("Telegram command menu registered (%d commands)", len(commands))
+
     async def start(self) -> None:
         self.setup_handlers()
         await self.app.initialize()
         await self.app.start()
+        await self._register_commands()
         await self.app.updater.start_polling(drop_pending_updates=True)
         logger.info("Telegram bot started")
 
